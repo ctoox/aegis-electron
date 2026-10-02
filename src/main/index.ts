@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow } from "electron";
+import { app, shell, BrowserWindow, ipcMain } from "electron";
 import { join } from "path";
 
 function createWindow(): void {
@@ -8,6 +8,7 @@ function createWindow(): void {
     height: 680,
     minWidth: 800,
     minHeight: 560,
+    frame: false, // 自绘标题栏 (VS Code 式), 拖拽用 -webkit-app-region
     webPreferences: {
       preload: join(__dirname, "../preload/index.js"),
       contextIsolation: true,
@@ -40,6 +41,19 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 
-// IPC 冒烟: 与 Tauri 版 greet 对应
-import { ipcMain } from "electron";
+// ---- IPC: 冒烟 + 自绘标题栏的窗口控制 ----
 ipcMain.handle("greet", (_e, name: string) => `后端已连通, ${name}!`);
+
+ipcMain.handle("win:minimize", (e) => {
+  BrowserWindow.fromWebContents(e.sender)?.minimize();
+});
+ipcMain.handle("win:toggleMaximize", (e) => {
+  const w = BrowserWindow.fromWebContents(e.sender);
+  if (!w) return;
+  // Electron 没有 toggleMaximize, 手动判断
+  if (w.isMaximized()) w.unmaximize();
+  else w.maximize();
+});
+ipcMain.handle("win:close", (e) => {
+  BrowserWindow.fromWebContents(e.sender)?.close();
+});

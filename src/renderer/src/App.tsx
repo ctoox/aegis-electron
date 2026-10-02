@@ -1,5 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
 
+declare global {
+  interface Window {
+    api: {
+      greet: (name: string) => Promise<string>;
+      win: {
+        minimize: () => Promise<void>;
+        toggleMaximize: () => Promise<void>;
+        close: () => Promise<void>;
+      };
+    };
+  }
+}
+
 type Strength = "good" | "fair" | "weak" | "none";
 
 type Entry = {
@@ -49,16 +62,17 @@ function avatarColor(e: Entry) {
   return AVATAR_COLORS[e.hue % AVATAR_COLORS.length];
 }
 
-declare global {
-  interface Window {
-    api: { greet: (name: string) => Promise<string> };
-  }
-}
-
 // ---- IPC 适配: 同一份 UI 在两栈各接各的后端 ----
 async function pingBackend(): Promise<string> {
   return window.api.greet("神盾");
 }
+
+// ---- 自绘标题栏的窗口控制 (Electron: IPC → 主进程, 拖拽用 -webkit-app-region) ----
+const win = {
+  minimize: () => window.api.win.minimize(),
+  toggleMaximize: () => window.api.win.toggleMaximize(),
+  close: () => window.api.win.close(),
+};
 
 export default function App() {
   const [cat, setCat] = useState("all");
@@ -94,7 +108,32 @@ export default function App() {
   }
 
   return (
-    <div className="app">
+    <div className="shell">
+      {/* ===== 自绘标题栏 ===== */}
+      <div className="titlebar" data-tauri-drag-region>
+        <div className="tb-title" data-tauri-drag-region>
+          🛡️ 神盾 Aegis
+        </div>
+        <div className="tb-btns">
+          <button className="tb-btn" onClick={win.minimize} title="最小化">
+            <svg width="10" height="10" viewBox="0 0 10 10">
+              <path d="M0 5h10" stroke="currentColor" strokeWidth="1" />
+            </svg>
+          </button>
+          <button className="tb-btn" onClick={win.toggleMaximize} title="最大化/还原">
+            <svg width="10" height="10" viewBox="0 0 10 10">
+              <rect x="0.5" y="0.5" width="9" height="9" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1" />
+            </svg>
+          </button>
+          <button className="tb-btn tb-close" onClick={win.close} title="关闭">
+            <svg width="10" height="10" viewBox="0 0 10 10">
+              <path d="M0 0l10 10M10 0L0 10" stroke="currentColor" strokeWidth="1" />
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <div className="app">
       {/* ===== 侧栏 ===== */}
       <aside className="sidebar">
         <div className="brand">
@@ -303,6 +342,7 @@ export default function App() {
           </div>
         )}
       </main>
+      </div>
     </div>
   );
 }
