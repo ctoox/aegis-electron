@@ -12,6 +12,8 @@ export interface Entry {
   favorite: boolean;
   created_at: number;
   updated_at: number;
+  /** 扩展字段: 目前用 totp (Base32 密钥) */
+  extra: Record<string, string>;
 }
 
 export type Strength = "good" | "fair" | "weak" | "none";

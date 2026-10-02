@@ -25,6 +25,9 @@ const api = {
       ipcRenderer.invoke("pw:generate", opts),
     passphrase: () => ipcRenderer.invoke("pw:passphrase"),
   },
+  totp: {
+    code: (secret: string) => ipcRenderer.invoke("totp:code", secret),
+  },
 };
 
 export type Api = typeof api;

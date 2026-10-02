@@ -32,6 +32,14 @@ declare global {
         }) => Promise<string>;
         passphrase: () => Promise<string>;
       };
+      totp: {
+        code: (secret: string) => Promise<{
+          code: string;
+          remaining: number;
+          period: number;
+          error?: string;
+        }>;
+      };
     };
   }
 }

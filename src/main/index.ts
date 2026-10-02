@@ -8,6 +8,7 @@ import {
   GenOptions,
 } from "../core/generate";
 import { VaultStore } from "../core/vault";
+import { totpView } from "../core/totp";
 import type { Entry, VaultStatus } from "../core/types";
 
 let vault: VaultStore | null = null;
@@ -137,3 +138,4 @@ ipcMain.handle("vault:remove", (_e, id: string) => {
 // ---- IPC: 生成器 ----
 ipcMain.handle("pw:generate", (_e, opts: GenOptions) => generatePassword(opts));
 ipcMain.handle("pw:passphrase", () => generatePassphrase());
+ipcMain.handle("totp:code", (_e, secret: string) => totpView(secret));

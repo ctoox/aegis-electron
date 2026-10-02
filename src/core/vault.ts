@@ -38,6 +38,7 @@ export function newEntry(partial: Partial<Entry> = {}): Entry {
     favorite: false,
     created_at: now,
     updated_at: now,
+    extra: {},
     ...partial,
   };
 }

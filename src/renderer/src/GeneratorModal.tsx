@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "./api";
+import { ColoredPassword } from "./ColoredPassword";
 
 const DEFAULT_OPTS = {
   length: 20,
@@ -42,7 +43,9 @@ export function GeneratorModal(props: {
     <div className="modal-mask" onMouseDown={props.onClose}>
       <div className="modal fade-in" onMouseDown={(e) => e.stopPropagation()}>
         <h2>生成密码</h2>
-        <div className="gen-preview">{preview || `参数无效: ${err}`}</div>
+        <div className="gen-preview">
+          {preview ? <ColoredPassword value={preview} /> : `参数无效: ${err}`}
+        </div>
         <label className="gen-row">
           <span>长度</span>
           <input

@@ -1,11 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import type { EntryWithStrength } from "../../core/types";
 import { api } from "./api";
+import { ColoredPassword } from "./ColoredPassword";
+import { CommandPalette } from "./CommandPalette";
 import { EntryModal } from "./EntryModal";
 import { Gate } from "./Gate";
 import { GeneratorModal } from "./GeneratorModal";
+import { TotpCard } from "./TotpCard";
 
 type GateMode = "loading" | "create" | "unlock" | "ready";
+type Theme = "light" | "dark" | "system";
 
 const AVATAR_COLORS = [
   "#5E9CE6", "#7A6FE0", "#E07A5F", "#2FA356",
@@ -45,6 +49,32 @@ export default function App() {
     | null
   >(null);
   const [backend, setBackend] = useState("后端连接中…");
+  const [cmdOpen, setCmdOpen] = useState(false);
+  const [theme, setTheme] = useState<Theme>(
+    () => (localStorage.getItem("aegis.theme") as Theme) || "system",
+  );
+
+  // 主题: 跟随系统时用媒体查询, 手动时打 data-theme
+  useEffect(() => {
+    localStorage.setItem("aegis.theme", theme);
+    document.documentElement.dataset.theme = theme;
+  }, [theme]);
+
+  function cycleTheme() {
+    setTheme((t) => (t === "light" ? "dark" : t === "dark" ? "system" : "light"));
+  }
+
+  // 全局快捷键: Ctrl/Cmd+K 命令面板
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        if (gate === "ready") setCmdOpen((v) => !v);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [gate]);
 
   async function refresh(keepSel?: string) {
     const list = await api.vault.list();
@@ -99,6 +129,36 @@ export default function App() {
     await api.vault.remove(e.id);
     await refresh();
   }
+
+  function copyText(t: string) {
+    navigator.clipboard?.writeText(t);
+  }
+
+  async function lockVault() {
+    await api.vault.lock();
+    setEntries([]);
+    setSelId(null);
+    setCmdOpen(false);
+    setGate("unlock");
+  }
+
+  function onPaletteAction(id: string) {
+    if (id === "new") setModal({ kind: "entry", entry: null });
+    else if (id === "theme") cycleTheme();
+    else if (id === "lock") lockVault();
+    else if (id === "generate") setModal({ kind: "gen" });
+    else if (id === "generate-copy") {
+      api.pw
+        .generate({
+          length: 20, useUpper: true, useLower: true,
+          useDigits: true, useSymbols: true, minDigits: 1, minSymbols: 1,
+        })
+        .then((pw) => copyText(pw));
+    }
+  }
+
+  const themeLabel =
+    theme === "light" ? "浅色" : theme === "dark" ? "深色" : "跟随系统";
 
   const visible = useMemo(() => {
     let list = entries;
@@ -172,6 +232,13 @@ export default function App() {
             </button>
             <button className="nav-item" onClick={() => setModal({ kind: "entry", entry: null })}>
               <span>➕</span> 新增条目
+            </button>
+            <button className="nav-item" onClick={() => setCmdOpen(true)}>
+              <span>⌘</span> 命令面板 <span className="cnt">Ctrl K</span>
+            </button>
+            <button className="nav-item" onClick={cycleTheme}>
+              <span>{theme === "light" ? "☀" : theme === "dark" ? "☾" : "◐"}</span>
+              主题：{themeLabel}
             </button>
             <div className="health-card">
               <div className="health-num">{score}</div>
@@ -262,16 +329,19 @@ export default function App() {
                   <div className="field">
                     <div className="grow">
                       <div className="lbl">密码</div>
-                      <div className="val mono">
-                        {showPw ? sel.password : "••••••••••••••••"}
+                      <div className="val">
+                        {showPw ? (
+                          <ColoredPassword value={sel.password} />
+                        ) : (
+                          <span className="mono">••••••••••••••••</span>
+                        )}
                       </div>
                     </div>
                     <div className="ops">
                       <button className="iconbtn" onClick={() => setShowPw(!showPw)}>
                         {showPw ? "🙈" : "👁"}
                       </button>
-                      <button className="iconbtn"
-                        onClick={() => navigator.clipboard?.writeText(sel.password)}>⧉</button>
+                      <button className="iconbtn" onClick={() => copyText(sel.password)}>⧉</button>
                     </div>
                   </div>
                 ) : (
@@ -286,6 +356,8 @@ export default function App() {
                     <button className="gen-ghost" onClick={() => setModal({ kind: "gen" })}>自定义参数…</button>
                   </div>
                 )}
+
+                {sel.extra?.totp && <TotpCard secret={sel.extra.totp} />}
 
                 {sel.url && (
                   <div className="field">
@@ -323,6 +395,18 @@ export default function App() {
       )}
 
       {/* ===== 弹窗 ===== */}
+      {cmdOpen && (
+        <CommandPalette
+          entries={entries}
+          onClose={() => setCmdOpen(false)}
+          onCopy={copyText}
+          onSelectEntry={(id) => {
+            setSelId(id);
+            setShowPw(false);
+          }}
+          onAction={onPaletteAction}
+        />
+      )}
       {modal?.kind === "entry" && (
         <EntryModal
           initial={modal.entry}

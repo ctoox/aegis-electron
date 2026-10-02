@@ -15,6 +15,7 @@ export function EntryModal(props: {
   const [password, setPassword] = useState(editing?.password ?? "");
   const [url, setUrl] = useState(editing?.url ?? "");
   const [notes, setNotes] = useState(editing?.notes ?? "");
+  const [totp, setTotp] = useState(editing?.extra?.totp ?? "");
   const [err, setErr] = useState("");
   const [genOpen, setGenOpen] = useState(false);
 
@@ -24,12 +25,14 @@ export function EntryModal(props: {
       return;
     }
     try {
+      const extra = { ...(editing?.extra ?? {}), totp: totp.trim() };
       const patch = {
         title: title.trim(),
         username: username.trim(),
         password,
         url: url.trim(),
         notes,
+        extra,
       };
       if (editing) await api.vault.update(editing.id, patch);
       else await api.vault.add(patch);
@@ -78,6 +81,12 @@ export function EntryModal(props: {
           placeholder="网址"
           value={url}
           onChange={(e) => setUrl(e.target.value)}
+        />
+        <input
+          className="gate-input"
+          placeholder="TOTP 密钥（可选，Base32，如 JBSWY3DPEHPK3PXP）"
+          value={totp}
+          onChange={(e) => setTotp(e.target.value)}
         />
         <textarea
           className="gate-input"

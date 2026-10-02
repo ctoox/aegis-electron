@@ -68,11 +68,11 @@
 | 4 | 字段卡（打码/眼睛/复制/生成） | ✅ 已有 | Bitwarden FieldView |
 | 5 | 主密码门（创建/解锁/错误态） | ✅ 已有 | - |
 | 6 | 参数化生成器弹窗 | ✅ 已有 | 对齐 Python 版 GeneratorDialog |
-| 7 | **密码字符着色**（数字/符号不同色） | ⬜ 待做 | Bitwarden ColorPasswordPipe |
-| 8 | **命令面板**（Ctrl+K 全局搜索+动作） | ⬜ 待做 | Latch / Raycast |
-| 9 | **TOTP 卡片**（环形倒计时） | ⬜ 待做 | KeePassXC / Bitwarden |
+| 7 | **密码字符着色**（数字/符号不同色） | ✅ 已有 | Bitwarden ColorPasswordPipe |
+| 8 | **命令面板**（Ctrl+K 全局搜索+动作） | ✅ 已有 | Latch / Raycast |
+| 9 | **TOTP 卡片**（环形倒计时） | ✅ 已有 | KeePassXC / Bitwarden |
 | 10 | 健康检查页（弱/重复/泄露） | ⬜ 待做 | Latch HIBP k-匿名 |
-| 11 | 明暗主题切换（跟随系统） | ⬜ 待做 | yapk-next / Bitwarden themify |
+| 11 | 明暗主题切换（跟随系统） | ✅ 已有 | yapk-next / Bitwarden themify |
 | 12 | 自动锁定 + 剪贴板自清提示 | ⬜ 待做 | Latch（30min / 30s） |
 | 13 | 导入导出（CSV/KeePass/自有格式） | ⬜ 待做 | KeePassXC 兼容 |
 | 14 | 设置页（KDF 参数/锁定策略/快捷键） | ⬜ 待做 | - |
