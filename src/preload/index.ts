@@ -30,6 +30,7 @@ const api = {
   },
   app: {
     platform: (): Promise<string> => ipcRenderer.invoke("app:platform"),
+    material: () => ipcRenderer.invoke("app:material"),
   },
 };
 

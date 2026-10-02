@@ -984,3 +984,176 @@ button {
 .titlebar.mac .tb-title {
   padding-left: 0;
 }
+
+/* ==========================================================================
+   液态玻璃 / 毛玻璃 (macOS 26 Liquid Glass 观感)
+   三层来源, 由主进程探测后写到 <html data-mat="...">, 开关写 data-glass:
+     vibrancy  macOS         → 系统在窗口背后真模糊 (窗口底色必须全透明)
+     acrylic   Win11 22H2+   → 系统亚克力
+     mica      Win11 21H2    → 系统云母
+     inapp     Win10 / Linux → 系统没开放窗口模糊 API, 改在页面内做:
+                               彩色底图 + backdrop-filter, 窗口自己糊自己
+   data-glass="off" 时下面规则全部不匹配, 自动回到原来的实心观感
+   ========================================================================== */
+
+/* ---- 玻璃色板: 浅色 ---- */
+:root {
+  --g-hi: rgba(255, 255, 255, 0.72); /* 卡片 / 浮层 */
+  --g-mid: rgba(255, 255, 255, 0.5); /* 侧栏 */
+  --g-lo: rgba(255, 255, 255, 0.34); /* 标题栏 / 列表栏 */
+  --g-veil: rgba(255, 255, 255, 0.44); /* 详情区薄纱 */
+  --g-field: rgba(255, 255, 255, 0.46);
+  --g-active: rgba(0, 122, 255, 0.14);
+  --g-line: rgba(0, 0, 0, 0.07);
+  /* 液态玻璃的"凝固感": 上缘一道亮高光 + 一圈极淡描边 */
+  --g-rim:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.9),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.34);
+  --g-shadow: 0 14px 40px rgba(20, 30, 60, 0.14);
+  --g-blur: blur(30px) saturate(180%);
+  --g-bg:
+    radial-gradient(circle at 10% 12%, rgba(88, 140, 255, 0.42) 0 16%, rgba(88, 140, 255, 0) 27%),
+    radial-gradient(circle at 92% 6%, rgba(255, 120, 190, 0.32) 0 12%, rgba(255, 120, 190, 0) 23%),
+    radial-gradient(circle at 78% 92%, rgba(60, 200, 150, 0.3) 0 14%, rgba(60, 200, 150, 0) 25%),
+    radial-gradient(circle at 12% 96%, rgba(255, 190, 90, 0.26) 0 12%, rgba(255, 190, 90, 0) 23%),
+    linear-gradient(160deg, #f6f7fb 0%, #eef0f7 100%);
+}
+
+/* ---- 玻璃色板: 深色 (白色半透明要压下来, 描边反过来提亮) ---- */
+:root[data-theme="dark"] {
+  --g-hi: rgba(74, 74, 80, 0.58);
+  --g-mid: rgba(52, 52, 58, 0.5);
+  --g-lo: rgba(38, 38, 44, 0.36);
+  --g-veil: rgba(28, 28, 34, 0.46);
+  --g-field: rgba(62, 62, 68, 0.42);
+  --g-active: rgba(10, 132, 255, 0.24);
+  --g-line: rgba(255, 255, 255, 0.1);
+  --g-rim:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.16),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.07);
+  --g-shadow: 0 14px 40px rgba(0, 0, 0, 0.5);
+  --g-bg:
+    radial-gradient(circle at 10% 12%, rgba(40, 80, 190, 0.32) 0 16%, rgba(40, 80, 190, 0) 27%),
+    radial-gradient(circle at 92% 6%, rgba(150, 50, 120, 0.24) 0 12%, rgba(150, 50, 120, 0) 23%),
+    radial-gradient(circle at 78% 92%, rgba(24, 110, 86, 0.24) 0 14%, rgba(24, 110, 86, 0) 25%),
+    radial-gradient(circle at 12% 96%, rgba(130, 96, 32, 0.2) 0 12%, rgba(130, 96, 32, 0) 23%),
+    linear-gradient(160deg, #141419 0%, #0f0f13 100%);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root[data-theme="system"] {
+    --g-hi: rgba(74, 74, 80, 0.58);
+    --g-mid: rgba(52, 52, 58, 0.5);
+    --g-lo: rgba(38, 38, 44, 0.36);
+    --g-veil: rgba(28, 28, 34, 0.46);
+    --g-field: rgba(62, 62, 68, 0.42);
+    --g-active: rgba(10, 132, 255, 0.24);
+    --g-line: rgba(255, 255, 255, 0.1);
+    --g-rim:
+      inset 0 1px 0 0 rgba(255, 255, 255, 0.16),
+      inset 0 0 0 1px rgba(255, 255, 255, 0.07);
+    --g-shadow: 0 14px 40px rgba(0, 0, 0, 0.5);
+    --g-bg:
+      radial-gradient(circle at 10% 12%, rgba(40, 80, 190, 0.32) 0 16%, rgba(40, 80, 190, 0) 27%),
+      radial-gradient(circle at 92% 6%, rgba(150, 50, 120, 0.24) 0 12%, rgba(150, 50, 120, 0) 23%),
+      radial-gradient(circle at 78% 92%, rgba(24, 110, 86, 0.24) 0 14%, rgba(24, 110, 86, 0) 25%),
+      radial-gradient(circle at 12% 96%, rgba(130, 96, 32, 0.2) 0 12%, rgba(130, 96, 32, 0) 23%),
+      linear-gradient(160deg, #141419 0%, #0f0f13 100%);
+  }
+}
+
+/* ---- 有系统材质时, 模糊由系统在窗口背后画, 页面自己不能再糊一遍 ---- */
+:root[data-mat="vibrancy"][data-glass="on"],
+:root[data-mat="acrylic"][data-glass="on"],
+:root[data-mat="mica"][data-glass="on"] {
+  --g-blur: none;
+}
+/* 窗口底色已经全透明, 页面底色也必须让开, 否则看不到系统模糊 */
+:root[data-mat="vibrancy"][data-glass="on"] body,
+:root[data-mat="acrylic"][data-glass="on"] body,
+:root[data-mat="mica"][data-glass="on"] body {
+  background: transparent;
+}
+
+/* ---- 页内玻璃: 先给窗口铺一张"有内容"的底图, 玻璃才有东西可糊 ---- */
+:root[data-mat="inapp"][data-glass="on"] body {
+  background: var(--g-bg);
+  background-attachment: fixed;
+}
+
+/* ---- 四块面板: 半透明 + 模糊 ---- */
+:root[data-glass="on"] .titlebar,
+:root[data-glass="on"] .sidebar,
+:root[data-glass="on"] .listbar,
+:root[data-glass="on"] .detail {
+  -webkit-backdrop-filter: var(--g-blur);
+  backdrop-filter: var(--g-blur);
+}
+
+:root[data-glass="on"] .titlebar {
+  background: var(--g-lo);
+  border-bottom: 1px solid var(--g-line);
+}
+
+:root[data-glass="on"] .sidebar {
+  background: var(--g-mid);
+  border-right: 1px solid var(--g-line);
+}
+
+:root[data-glass="on"] .listbar {
+  background: var(--g-lo);
+  border-right: 1px solid var(--g-line);
+}
+
+:root[data-glass="on"] .detail {
+  background: var(--g-veil);
+}
+
+/* ---- 卡片 / 浮层: 一层更亮的玻璃 ---- */
+:root[data-glass="on"] .health-card,
+:root[data-glass="on"] .search,
+:root[data-glass="on"] .detail-card,
+:root[data-glass="on"] .gate-card,
+:root[data-glass="on"] .cmd,
+:root[data-glass="on"] .modal {
+  background: var(--g-hi);
+  border-color: var(--g-line);
+  box-shadow: var(--g-rim), var(--g-shadow);
+  -webkit-backdrop-filter: var(--g-blur);
+  backdrop-filter: var(--g-blur);
+}
+
+:root[data-glass="on"] .gate-card {
+  box-shadow: var(--g-rim), 0 24px 60px rgba(20, 30, 60, 0.18);
+}
+
+:root[data-glass="on"] .field {
+  background: var(--g-field);
+  border-color: var(--g-line);
+}
+
+/* ---- 交互态: 悬停/选中的底色也要跟着变透明, 否则会在玻璃上"贴膏药" ---- */
+:root[data-glass="on"] .row:hover,
+:root[data-glass="on"] .nav-item:hover {
+  background: var(--g-hi);
+}
+
+:root[data-glass="on"] .row.active,
+:root[data-glass="on"] .cmd-row.active,
+:root[data-glass="on"] .nav-item.active {
+  background: var(--g-active);
+}
+
+:root[data-glass="on"] .tb-btn:hover {
+  background: rgba(255, 255, 255, 0.5);
+}
+
+:root[data-theme="dark"][data-glass="on"] .tb-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+/* 侧栏"玻璃效果"开关处于开启态时的提示 */
+.nav-item.on .cnt,
+.nav-item.on > span:first-child {
+  color: var(--accent);
+}

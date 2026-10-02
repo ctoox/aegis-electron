@@ -42,6 +42,11 @@ declare global {
       };
       app: {
         platform: () => Promise<string>;
+        material: () => Promise<{
+          material: "vibrancy" | "acrylic" | "mica" | "inapp";
+          platform: string;
+          native: boolean;
+        }>;
       };
     };
   }

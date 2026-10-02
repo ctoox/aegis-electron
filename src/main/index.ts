@@ -1,5 +1,14 @@
-import { app, shell, BrowserWindow, ipcMain, Menu, MenuItemConstructorOptions } from "electron";
+import {
+  app,
+  shell,
+  nativeTheme,
+  BrowserWindow,
+  ipcMain,
+  Menu,
+  MenuItemConstructorOptions,
+} from "electron";
 import { existsSync, readFileSync } from "node:fs";
+import * as os from "node:os";
 import { join } from "path";
 import {
   generatePassphrase,
@@ -38,6 +47,30 @@ function readHint(p: string): string {
 const IS_MAC = process.platform === "darwin";
 
 /**
+ * 玻璃材质能力探测 (三层降级):
+ *  vibrancy → macOS 系统毛玻璃 (vibrancy: under-window)
+ *  acrylic  → Windows 11 22H2+ 系统亚克力 (backgroundMaterial)
+ *  mica     → Windows 11 21H2 云母 (backgroundMaterial, 亚克力的前身)
+ *  inapp    → 其他 (Win10 / Win7 / Linux/UOS): 系统没有可调用的窗口模糊 API,
+ *             改由前端用 backdrop-filter 做"页内玻璃" —— 窗口内自己糊自己
+ */
+type Material = "vibrancy" | "acrylic" | "mica" | "inapp";
+
+function detectMaterial(): Material {
+  if (IS_MAC) return "vibrancy";
+  if (process.platform === "win32") {
+    const build = Number(os.release().split(".")[2] ?? 0);
+    if (build >= 22621) return "acrylic"; // Win11 22H2+
+    if (build >= 22000) return "mica"; // Win11 21H2
+  }
+  return "inapp";
+}
+
+const MATERIAL = detectMaterial();
+/** 有系统级材质时, 窗口底色必须全透明, 否则系统画的模糊会被不透明底色盖住 */
+const NATIVE_MATERIAL = MATERIAL === "vibrancy" || MATERIAL === "acrylic" || MATERIAL === "mica";
+
+/**
  * 菜单. macOS 必须要有 App/编辑菜单 —— 否则 Cmd+C/V/X/Q 这些标准快捷键
  * 全都不生效 (Electron 在 mac 上的经典坑: 没有菜单就没有编辑快捷键)。
  * Windows/Linux 自绘标题栏, 不需要原生菜单栏。
@@ -69,12 +102,23 @@ function buildMenu(): void {
 }
 
 function createWindow(): void {
+  const dark = nativeTheme.shouldUseDarkColors;
+
   const win = new BrowserWindow({
     title: "神盾 Aegis",
     width: 1000,
     height: 680,
     minWidth: 800,
     minHeight: 560,
+    // 原生材质下窗口底色必须全透明 (系统在窗口背后画模糊);
+    // 页内玻璃模式下则给一个与主题一致的实底, 避免启动瞬间白闪
+    backgroundColor: NATIVE_MATERIAL ? "#00000000" : dark ? "#1c1c1e" : "#f5f5f7",
+    // 系统级毛玻璃: macOS 用 vibrancy, Windows 11 用 backgroundMaterial
+    ...(MATERIAL === "vibrancy"
+      ? { vibrancy: "under-window" as const, visualEffectState: "active" as const }
+      : {}),
+    ...(MATERIAL === "acrylic" ? { backgroundMaterial: "acrylic" as const } : {}),
+    ...(MATERIAL === "mica" ? { backgroundMaterial: "mica" as const } : {}),
     // 标题栏按平台分支:
     //  macOS → hiddenInset: 保留系统红黄绿圆点(最原生), 内容顶到窗口顶
     //  Windows/Linux → frame:false: 全自绘右三键
@@ -139,6 +183,12 @@ ipcMain.handle("win:close", (e) => {
 // ---- IPC: 密码库 (加密核心在主进程, 渲染层只拿明文视图) ----
 ipcMain.handle("vault:status", () => vaultStatus());
 ipcMain.handle("app:platform", () => process.platform);
+// 渲染层据此决定玻璃画法: native 材质交给系统, 否则自己 backdrop-filter
+ipcMain.handle("app:material", () => ({
+  material: MATERIAL,
+  platform: process.platform,
+  native: NATIVE_MATERIAL,
+}));
 
 ipcMain.handle("vault:create", async (_e, password: string, hint: string) => {
   if (vault) vault.lock();

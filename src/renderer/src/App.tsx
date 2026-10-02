@@ -10,6 +10,14 @@ import { TotpCard } from "./TotpCard";
 
 type GateMode = "loading" | "create" | "unlock" | "ready";
 type Theme = "light" | "dark" | "system";
+type Material = "vibrancy" | "acrylic" | "mica" | "inapp";
+
+const MATERIAL_LABEL: Record<Material, string> = {
+  vibrancy: "系统毛玻璃",
+  acrylic: "亚克力",
+  mica: "云母",
+  inapp: "页内玻璃",
+};
 
 const AVATAR_COLORS = [
   "#5E9CE6", "#7A6FE0", "#E07A5F", "#2FA356",
@@ -54,10 +62,30 @@ export default function App() {
     () => (localStorage.getItem("aegis.theme") as Theme) || "system",
   );
   const [isMac, setIsMac] = useState(false);
+  const [material, setMaterial] = useState<Material>("inapp");
+  // 玻璃效果开关: 低端机上 backdrop-filter 有代价, 允许关掉
+  const [glassOn, setGlassOn] = useState(
+    () => localStorage.getItem("aegis.glass") !== "off",
+  );
 
   useEffect(() => {
     api.app.platform().then((p) => setIsMac(p === "darwin"));
+    api.app
+      .material()
+      .then((m) => setMaterial(m.material))
+      .catch(() => setMaterial("inapp"));
   }, []);
+
+  // 玻璃材质挂到 <html>: data-glass 控制开关, data-mat 记录材质来源
+  useEffect(() => {
+    const root = document.documentElement;
+    root.dataset.glass = glassOn ? "on" : "off";
+    root.dataset.mat = material;
+  }, [material, glassOn]);
+
+  useEffect(() => {
+    localStorage.setItem("aegis.glass", glassOn ? "on" : "off");
+  }, [glassOn]);
 
   // 主题: 跟随系统时用媒体查询, 手动时打 data-theme
   useEffect(() => {
@@ -247,6 +275,9 @@ export default function App() {
               <span>{theme === "light" ? "☀" : theme === "dark" ? "☾" : "◐"}</span>
               主题：{themeLabel}
             </button>
+            <button className={`nav-item ${glassOn ? "on" : ""}`} onClick={() => setGlassOn((v) => !v)}>
+              <span>❖</span> 玻璃效果：{glassOn ? "开" : "关"}
+            </button>
             <div className="health-card">
               <div className="health-num">{score}</div>
               <div>
@@ -256,6 +287,8 @@ export default function App() {
             </div>
             <div className="stack-chip">
               <span className="ok-dot">●</span> {backend}
+              <br />
+              玻璃：{MATERIAL_LABEL[material]}
             </div>
           </aside>
 
