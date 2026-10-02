@@ -975,3 +975,12 @@ button {
   color: var(--text-3);
   font-size: 12px;
 }
+
+/* macOS: 给系统红黄绿圆点留位 (圆点由系统绘制, 我们只让出空间) */
+.titlebar.mac {
+  padding-left: 78px;
+}
+
+.titlebar.mac .tb-title {
+  padding-left: 0;
+}

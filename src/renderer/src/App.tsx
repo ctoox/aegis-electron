@@ -53,6 +53,11 @@ export default function App() {
   const [theme, setTheme] = useState<Theme>(
     () => (localStorage.getItem("aegis.theme") as Theme) || "system",
   );
+  const [isMac, setIsMac] = useState(false);
+
+  useEffect(() => {
+    api.app.platform().then((p) => setIsMac(p === "darwin"));
+  }, []);
 
   // 主题: 跟随系统时用媒体查询, 手动时打 data-theme
   useEffect(() => {
@@ -182,28 +187,30 @@ export default function App() {
 
   return (
     <div className="shell">
-      {/* ===== 自绘标题栏 ===== */}
-      <div className="titlebar" data-tauri-drag-region>
+      {/* ===== 自绘标题栏 (macOS 用系统红黄绿圆点, 仅留拖拽区) ===== */}
+      <div className={`titlebar ${isMac ? "mac" : ""}`} data-tauri-drag-region>
         <div className="tb-title" data-tauri-drag-region>
           🛡️ 神盾 Aegis{gate !== "ready" ? "" : ` — ${entries.length} 个条目`}
         </div>
-        <div className="tb-btns">
-          <button className="tb-btn" onClick={() => api.win.minimize()} title="最小化">
-            <svg width="10" height="10" viewBox="0 0 10 10">
-              <path d="M0 5h10" stroke="currentColor" strokeWidth="1" />
-            </svg>
-          </button>
-          <button className="tb-btn" onClick={() => api.win.toggleMaximize()} title="最大化/还原">
-            <svg width="10" height="10" viewBox="0 0 10 10">
-              <rect x="0.5" y="0.5" width="9" height="9" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1" />
-            </svg>
-          </button>
-          <button className="tb-btn tb-close" onClick={() => api.win.close()} title="关闭">
-            <svg width="10" height="10" viewBox="0 0 10 10">
-              <path d="M0 0l10 10M10 0L0 10" stroke="currentColor" strokeWidth="1" />
-            </svg>
-          </button>
-        </div>
+        {!isMac && (
+          <div className="tb-btns">
+            <button className="tb-btn" onClick={() => api.win.minimize()} title="最小化">
+              <svg width="10" height="10" viewBox="0 0 10 10">
+                <path d="M0 5h10" stroke="currentColor" strokeWidth="1" />
+              </svg>
+            </button>
+            <button className="tb-btn" onClick={() => api.win.toggleMaximize()} title="最大化/还原">
+              <svg width="10" height="10" viewBox="0 0 10 10">
+                <rect x="0.5" y="0.5" width="9" height="9" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1" />
+              </svg>
+            </button>
+            <button className="tb-btn tb-close" onClick={() => api.win.close()} title="关闭">
+              <svg width="10" height="10" viewBox="0 0 10 10">
+                <path d="M0 0l10 10M10 0L0 10" stroke="currentColor" strokeWidth="1" />
+              </svg>
+            </button>
+          </div>
+        )}
       </div>
 
       {gate === "loading" && <div className="empty"><div className="big">🛡️</div></div>}

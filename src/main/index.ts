@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain } from "electron";
+import { app, shell, BrowserWindow, ipcMain, Menu, MenuItemConstructorOptions } from "electron";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "path";
 import {
@@ -35,14 +35,55 @@ function readHint(p: string): string {
   }
 }
 
+const IS_MAC = process.platform === "darwin";
+
+/**
+ * 菜单. macOS 必须要有 App/编辑菜单 —— 否则 Cmd+C/V/X/Q 这些标准快捷键
+ * 全都不生效 (Electron 在 mac 上的经典坑: 没有菜单就没有编辑快捷键)。
+ * Windows/Linux 自绘标题栏, 不需要原生菜单栏。
+ */
+function buildMenu(): void {
+  if (!IS_MAC) {
+    Menu.setApplicationMenu(null);
+    return;
+  }
+  const template: MenuItemConstructorOptions[] = [
+    { role: "appMenu" },
+    {
+      label: "编辑",
+      submenu: [
+        { role: "undo" }, { role: "redo" }, { type: "separator" },
+        { role: "cut" }, { role: "copy" }, { role: "paste" },
+        { role: "selectAll" },
+      ],
+    },
+    {
+      label: "窗口",
+      submenu: [
+        { role: "minimize" }, { role: "zoom" }, { type: "separator" },
+        { role: "togglefullscreen" },
+      ],
+    },
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
 function createWindow(): void {
   const win = new BrowserWindow({
-    title: "神盾 Aegis (Electron)",
+    title: "神盾 Aegis",
     width: 1000,
     height: 680,
     minWidth: 800,
     minHeight: 560,
-    frame: false, // 自绘标题栏 (VS Code 式), 拖拽用 -webkit-app-region
+    // 标题栏按平台分支:
+    //  macOS → hiddenInset: 保留系统红黄绿圆点(最原生), 内容顶到窗口顶
+    //  Windows/Linux → frame:false: 全自绘右三键
+    ...(IS_MAC
+      ? {
+          titleBarStyle: "hiddenInset" as const,
+          trafficLightPosition: { x: 14, y: 13 },
+        }
+      : { frame: false }),
     webPreferences: {
       preload: join(__dirname, "../preload/index.js"),
       contextIsolation: true,
@@ -65,6 +106,7 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
+  buildMenu();
   createWindow();
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -72,8 +114,8 @@ app.whenReady().then(() => {
 });
 
 app.on("window-all-closed", () => {
+  // macOS 习惯: 关窗不退出应用(Dock 保留), 其他平台退出
   if (process.platform !== "darwin") app.quit();
-  // 锁定语义: 退出即清密钥 (进程结束自然清零; lock 兜底)
   vault?.lock();
 });
 
@@ -96,6 +138,7 @@ ipcMain.handle("win:close", (e) => {
 
 // ---- IPC: 密码库 (加密核心在主进程, 渲染层只拿明文视图) ----
 ipcMain.handle("vault:status", () => vaultStatus());
+ipcMain.handle("app:platform", () => process.platform);
 
 ipcMain.handle("vault:create", async (_e, password: string, hint: string) => {
   if (vault) vault.lock();

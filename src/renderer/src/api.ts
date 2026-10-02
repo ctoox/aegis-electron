@@ -40,6 +40,9 @@ declare global {
           error?: string;
         }>;
       };
+      app: {
+        platform: () => Promise<string>;
+      };
     };
   }
 }

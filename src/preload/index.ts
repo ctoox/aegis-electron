@@ -28,6 +28,9 @@ const api = {
   totp: {
     code: (secret: string) => ipcRenderer.invoke("totp:code", secret),
   },
+  app: {
+    platform: (): Promise<string> => ipcRenderer.invoke("app:platform"),
+  },
 };
 
 export type Api = typeof api;
