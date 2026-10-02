@@ -8,7 +8,7 @@
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit",
-    "test": "tsx tests/vault.test.ts && tsx tests/totp.test.ts",
+    "test": "tsx tests/vault.test.ts && tsx tests/totp.test.ts && tsx tests/health.test.ts && tsx tests/hibp.test.ts && tsx tests/portable.test.ts && tsx tests/settings.test.ts",
     "dist:win": "electron-vite build && electron-builder --win",
     "dist:mac": "electron-vite build && electron-builder --mac",
     "dist:linux": "electron-vite build && electron-builder --linux",

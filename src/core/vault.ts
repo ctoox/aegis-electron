@@ -146,6 +146,18 @@ export class VaultStore {
     return e;
   }
 
+  /**
+   * 批量新增 (导入用). 逐条 add() 每次都会重写整个文件并重新加密全部条目,
+   * 500 条就是 O(n²) → 这里只在最后 save() 一次.
+   */
+  addMany(partials: Partial<Entry>[]): Entry[] {
+    this.assertUnlocked();
+    const created = partials.map((p) => newEntry(p));
+    for (const e of created) this.entries.set(e.id, e);
+    if (created.length > 0) this.save();
+    return created;
+  }
+
   update(id: string, patch: Partial<Entry>): Entry {
     const e = this.entries.get(id);
     if (!e) throw new Error("条目不存在");

@@ -1,13 +1,15 @@
 import { useState } from "react";
 import type { Entry } from "../../core/types";
 import { api, cleanError } from "./api";
-import { GeneratorModal } from "./GeneratorModal";
+import { GeneratorModal, type GenDefaults } from "./GeneratorModal";
 
 /** 新增/编辑条目表单. */
 export function EntryModal(props: {
   initial?: Entry | null;
   onDone: () => void;
   onClose: () => void;
+  /** 透传给生成器弹窗的默认参数 (来自设置页) */
+  genDefaults?: GenDefaults;
 }) {
   const editing = props.initial ?? null;
   const [title, setTitle] = useState(editing?.title ?? "");
@@ -48,6 +50,7 @@ export function EntryModal(props: {
         <h2>{editing ? "编辑条目" : "新增条目"}</h2>
         {genOpen && (
           <GeneratorModal
+            defaults={props.genDefaults}
             onUse={(pw) => setPassword(pw)}
             onClose={() => setGenOpen(false)}
           />

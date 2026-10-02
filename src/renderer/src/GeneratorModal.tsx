@@ -12,12 +12,17 @@ const DEFAULT_OPTS = {
   minSymbols: 1,
 };
 
+/** 生成参数 (与设置页里存的默认值同构) */
+export type GenDefaults = Partial<typeof DEFAULT_OPTS>;
+
 /** 参数化生成器 (对齐 Python 版 GeneratorDialog): 长度/池/最少位数 + 预览. */
 export function GeneratorModal(props: {
   onUse: (pw: string) => void;
   onClose: () => void;
+  /** 设置页里存的默认参数; 不传就用内置默认 */
+  defaults?: GenDefaults;
 }) {
-  const [opts, setOpts] = useState(DEFAULT_OPTS);
+  const [opts, setOpts] = useState({ ...DEFAULT_OPTS, ...(props.defaults ?? {}) });
   const [preview, setPreview] = useState("");
   const [err, setErr] = useState("");
 

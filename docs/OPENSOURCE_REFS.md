@@ -71,11 +71,13 @@
 | 7 | **密码字符着色**（数字/符号不同色） | ✅ 已有 | Bitwarden ColorPasswordPipe |
 | 8 | **命令面板**（Ctrl+K 全局搜索+动作） | ✅ 已有 | Latch / Raycast |
 | 9 | **TOTP 卡片**（环形倒计时） | ✅ 已有 | KeePassXC / Bitwarden |
-| 10 | 健康检查页（弱/重复/泄露） | ⬜ 待做 | Latch HIBP k-匿名 |
+| 10 | 健康检查页（弱/重复/泄露） | ✅ 已有 | Latch HIBP k-匿名 |
 | 11 | 明暗主题切换（跟随系统） | ✅ 已有 | yapk-next / Bitwarden themify |
-| 12 | 自动锁定 + 剪贴板自清提示 | ⬜ 待做 | Latch（30min / 30s） |
-| 13 | 导入导出（CSV/KeePass/自有格式） | ⬜ 待做 | KeePassXC 兼容 |
-| 14 | 设置页（KDF 参数/锁定策略/快捷键） | ⬜ 待做 | - |
+| 12 | 自动锁定 + 剪贴板自清提示 | ✅ 已有 | Latch（30min / 30s） |
+| 13 | 导入导出（CSV/KeePass/自有格式） | ✅ 已有 | KeePassXC 兼容 |
+| 14 | 设置页（KDF 参数/锁定策略/快捷键） | ✅ 已有 | - |
+
+> 10/12/13/14 的实现细节与各家格式规格见 [`OPENSOURCE_FEATURES.md`](./OPENSOURCE_FEATURES.md)。
 
 ## 六、Tauri 迁移清单（将来换壳时照此执行）
 

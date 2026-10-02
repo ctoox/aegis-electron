@@ -22,6 +22,9 @@ export function CommandPalette(props: {
     const actions: Cmd[] = [
       { kind: "action", id: "new", label: "新增条目", hint: "动作" },
       { kind: "action", id: "generate", label: "生成密码（默认参数）", hint: "动作" },
+      { kind: "action", id: "health", label: "打开密码健康检查", hint: "动作" },
+      { kind: "action", id: "import", label: "从文件导入…", hint: "动作" },
+      { kind: "action", id: "settings", label: "打开设置", hint: "动作" },
       { kind: "action", id: "theme", label: "切换浅色 / 深色主题", hint: "动作" },
       { kind: "action", id: "lock", label: "锁定密码库", hint: "动作" },
     ];
