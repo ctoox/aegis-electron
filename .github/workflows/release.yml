@@ -106,6 +106,18 @@ jobs:
       - name: 生产构建
         run: npm run build
 
+      # 自动更新的"去哪查"是在**打包时**被写进 app-update.yml 的 (electron-updater
+      # 运行时读它), 所以 owner/repo 必须在这一步之前就绪 —— 拖到发布环节再设没用。
+      - name: 解析更新源 (owner/repo)
+        shell: bash
+        run: |
+          set -euo pipefail
+          OWNER="${GITHUB_REPOSITORY%%/*}"
+          REPO="${GITHUB_REPOSITORY##*/}"
+          echo "GH_OWNER=$OWNER" >> "$GITHUB_ENV"
+          echo "GH_REPO=$REPO" >> "$GITHUB_ENV"
+          echo "更新源 = $OWNER/$REPO"
+
       - name: 打包
         run: npx electron-builder ${{ matrix.args }} --publish never
         env:
@@ -127,9 +139,9 @@ jobs:
           set -euo pipefail
           ls -lh release/ || true
           case "${{ matrix.label }}" in
-            windows) PAT="release/*.exe" ;;
-            macos)   PAT="release/*.dmg" ;;
-            linux)   PAT="release/*.deb release/*.AppImage" ;;
+            windows) PAT="release/*.exe"; META="release/latest.yml" ;;
+            macos)   PAT="release/*.dmg"; META="release/latest-mac.yml" ;;
+            linux)   PAT="release/*.deb release/*.AppImage"; META="release/latest-linux.yml" ;;
           esac
           ok=0
           for f in $PAT; do
@@ -138,6 +150,16 @@ jobs:
           if [ "$ok" -eq 0 ]; then
             echo "::error::没找到任何安装包（期望 $PAT）"
             exit 1
+          fi
+          # 更新元数据缺了不会导致打包失败，只会让客户端的自动更新**永远显示
+          # "已是最新"**且不报任何错 —— 这种静默失败必须在 CI 阶段就拦住。
+          if [ ! -f "$META" ]; then
+            echo "::error::缺更新元数据 $META —— 客户端自动更新会永远显示「已是最新」。检查 build.publish 是否配好"
+            exit 1
+          fi
+          echo "✔ $META (自动更新索引)"
+          if ! ls release/*.blockmap >/dev/null 2>&1; then
+            echo "::warning::没有 .blockmap —— 更新会退化成全量下载（功能正常，只是更费流量）"
           fi
 
       - uses: actions/upload-artifact@v4
@@ -148,6 +170,8 @@ jobs:
             release/*.dmg
             release/*.deb
             release/*.AppImage
+            release/*.yml
+            release/*.blockmap
           if-no-files-found: error
           retention-days: 14
 

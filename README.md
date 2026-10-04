@@ -121,7 +121,7 @@ npm run ci
 | 流水线 | 触发 | 干什么 |
 |---|---|---|
 | `ci.yml` | 任何 push / PR | ubuntu + windows 双平台跑上面的质量门，再 `electron-vite build` 并校验 `out/` 三件套结构；测试结果写进 Actions 摘要 |
-| `release.yml` | 推 `v*` tag，或手动 Run workflow | 校验 tag 与 `package.json` 版本一致 → 三平台**原生**打包（win NSIS / mac dmg arm64+x64 / linux deb+AppImage）→ 产物自检 → 生成 `SHA256SUMS.txt` → 发 GitHub Release |
+| `release.yml` | 推 `v*` tag，或手动 Run workflow | 校验 tag 与 `package.json` 版本一致 → 解析更新源（owner/repo）→ 三平台**原生**打包（win NSIS / mac dmg arm64+x64 / linux deb+AppImage）→ 产物自检（**含 `latest*.yml` 必须存在**）→ 生成 `SHA256SUMS.txt` → 发 GitHub Release |
 
 ```bash
 # 发版
@@ -132,6 +132,31 @@ git push --follow-tags
 手动跑 `release.yml` 默认**只出包不发版**，勾上 `publish` 才发。macOS 签名/公证需要仓库 Secrets：
 `CSC_LINK` / `CSC_KEY_PASSWORD`（Apple 证书）+ `APPLE_ID` / `APPLE_APP_SPECIFIC_PASSWORD` / `APPLE_TEAM_ID`；
 没配就自动跳过签名，出未签名 dmg。Windows 代码签名走 `WIN_CSC_LINK` / `WIN_CSC_KEY_PASSWORD`。
+
+## 自动更新
+
+打包版通过 `electron-updater` 从 GitHub Releases 查新版本。更新索引是 electron-builder
+打包时产出的 `latest.yml`（macOS / Linux 分别是 `latest-mac.yml` / `latest-linux.yml`）。
+
+**发布源在打包那一刻就固化了**：`package.json` 的 `build.publish` 里的
+`${env.GH_OWNER}` / `${env.GH_REPO}` 会被写进 `resources/app-update.yml`，
+运行时读的就是这个文件。所以 CI 必须在**打包之前**解析出 owner/repo
+（`release.yml` 里的「解析更新源」那一步）—— 拖到发布环节再设是没用的。
+
+行为约定：查到新版本**不自动下载、也不自动安装**，只在设置页「关于」里换一个按钮
+（检查更新 → 下载新版本 → 重启并安装）。密码管理器在用户没同意的时候替换自己的
+可执行文件，是越界。
+
+| 要知道的点 | 说明 |
+|---|---|
+| 开发态 | `npm run dev` 不检查更新，设置页显示"开发模式不检查更新" |
+| 更新源没配 | 打包时缺 `GH_OWNER`/`GH_REPO`，`app-update.yml` 里会留 `${env.…}` 字面量。`src/main/updater.ts` 会**显式认出来**并提示 —— 否则表现是"永远已是最新"，不报错也不留痕 |
+| CI 加了一道闸 | 产物自检**强制要求** `latest*.yml` 存在，缺了直接红。少了它客户端永远查不到更新 |
+| macOS | 必须签名 + 公证，否则系统拒绝更新（`hardenedRuntime` + Squirrel.Mac 的前提）。没有 Apple 开发者账号之前，更新只在开发期可验证 |
+| `dev-app-update.yml` | 想在本地验证更新流程，可在项目根放一个指向本地目录的同名文件 |
+
+四条更新通道（含 Python 性能版的自研更新器、Web/Docker 的镜像滚动）见
+`C:\dev\aegis\docs\auto-update.md`。
 
 ### 踩过的坑（别再踩）
 
@@ -147,6 +172,14 @@ git push --follow-tags
   CI 上同样生效；若某天镜像挂了，删掉 `.npmrc` 里对应行即可回退官方源。
 - **托盘图标要显式写进 `build.files`**。`electron-builder` 的默认 glob **不含 `build/`**，
   开发时托盘正常、打包后托盘空白 —— 且不报错。和 `build/icon.png` 是同一类坑的两副面孔。
+- **侧栏底部的东西必须钉住**。侧栏是一列 flex（品牌 / 十几个导航项 / 健康卡 / 状态条）。
+  导航项原本都是 `.sidebar` 的直接子项、没有滚动容器，窗口一矮整列就溢出色栏，
+  **健康卡被挤出可视区** —— 而它是"要么完整显示，要么等于没有"的那类元素：
+  数字还在，却没人看得见。flex 项虽然默认可收缩，但按钮的 `min-height` 由内容撑住，
+  收不下去。现在导航区包在 `.nav-scroll`（`flex:1` + `min-height:0` + `overflow-y:auto`，
+  **`min-height:0` 是关键**），品牌/健康卡/状态条设 `flex:0 0 auto`。
+  `shot-ui.mjs` 的 `sidebarProbe()` 钉住这一点：把视口压到 520px，断言健康卡仍完整可见、
+  且导航区确实能滚。
 - **有些 shell 会注入 `ELECTRON_RUN_AS_NODE=1`**，那样 `electron.exe` 被当纯 Node 跑，
   `require("electron")` 返回**字符串路径**而不是模块，应用第一行就崩（报错还很有迷惑性：
   `Cannot read properties of undefined (reading 'requestSingleInstanceLock')`）。

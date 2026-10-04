@@ -70,9 +70,18 @@
       "icon": "build/icon.png",
       "synopsis": "神盾 Aegis 密码管理器"
     },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "${env.GH_OWNER}",
+        "repo": "${env.GH_REPO}",
+        "releaseType": "release"
+      }
+    ],
     "npmRebuild": false
   },
   "dependencies": {
+    "electron-updater": "^6.8.9",
     "hash-wasm": "^4.12.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"

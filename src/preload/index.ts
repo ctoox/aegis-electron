@@ -93,6 +93,20 @@ const api = {
     set: (patch: Record<string, unknown>) =>
       ipcRenderer.invoke("settings:set", patch),
   },
+  update: {
+    /** 当前状态快照 (界面挂载时拉一次) */
+    status: () => ipcRenderer.invoke("update:status"),
+    check: () => ipcRenderer.invoke("update:check"),
+    download: () => ipcRenderer.invoke("update:download"),
+    /** 重启并装上已下载的版本 */
+    install: () => ipcRenderer.invoke("update:install"),
+    /** 主进程后台查到新版本时推过来 */
+    onStatus: (cb: (status: unknown) => void) => {
+      const h = (_e: unknown, status: unknown) => cb(status);
+      ipcRenderer.on("update:status", h);
+      return () => ipcRenderer.removeListener("update:status", h);
+    },
+  },
 };
 
 export type Api = typeof api;

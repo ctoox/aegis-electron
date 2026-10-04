@@ -62,11 +62,14 @@ import {
   type Settings,
 } from "../core/settings";
 import type { Entry, VaultStatus } from "../core/types";
+import { Updater } from "./updater";
 
 let vault: VaultStore | null = null;
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let settings: Settings = { ...DEFAULT_SETTINGS };
+/** 自动更新。打包态才构造 (开发态 npm run dev 不该去查线上版本) */
+let updater: Updater | null = null;
 /** 真正要退出时才置 true —— 区分「关窗进托盘」与「退出应用」 */
 let isQuitting = false;
 
@@ -440,6 +443,20 @@ if (!hasSingleInstanceLock) {
     createWindow();
     buildTray();
     startLockWatcher();
+
+    // —— 自动更新 ——
+    // 只在打包态构造。检查延后 10 秒: 启动那一瞬间在抢磁盘 IO (解锁页、读设置),
+    // 再叠一个网络请求只会让冷启动更慢, 而且用户这时候也不关心有没有新版本。
+    updater = new Updater(app.isPackaged);
+    updater.subscribe((s) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("update:status", s);
+      }
+    });
+    if (app.isPackaged) {
+      setTimeout(() => void updater?.check(), 10_000);
+    }
+
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
     });
@@ -502,6 +519,14 @@ ipcMain.handle("app:info", () => ({
 ipcMain.handle("app:openDataDir", async () => {
   await shell.openPath(userDataDir);
 });
+
+// ---- IPC: 自动更新 ----
+// 状态是"拉 + 推"两条路: 界面挂载时拉一次拿当前快照, 之后靠 update:status 推。
+// 只拉不推的话, 后台检查发现新版本时界面已经挂好了, 就永远看不到。
+ipcMain.handle("update:status", () => updater?.current ?? null);
+ipcMain.handle("update:check", () => updater?.check() ?? null);
+ipcMain.handle("update:download", () => updater?.download() ?? null);
+ipcMain.handle("update:install", () => updater?.install() ?? false);
 
 ipcMain.handle("vault:create", async (_e, password: string, hint: string) => {
   touch();

@@ -6,6 +6,7 @@ import type { ImportPreview } from "../../core/portable";
 import type { Settings } from "../../core/prefs";
 import type { Snapshot } from "../../core/history";
 import type { BundleInfo, ShareBundle } from "../../core/share";
+import type { UpdateStatus } from "../../core/update";
 
 export type {
   HealthReport,
@@ -16,6 +17,7 @@ export type {
   Snapshot,
   BundleInfo,
   ShareBundle,
+  UpdateStatus,
 };
 
 export interface ImportCandidate extends ImportPreview {
@@ -172,6 +174,13 @@ declare global {
       settings: {
         get: () => Promise<Settings>;
         set: (patch: Partial<Settings>) => Promise<Settings>;
+      };
+      update: {
+        status: () => Promise<UpdateStatus | null>;
+        check: () => Promise<UpdateStatus | null>;
+        download: () => Promise<UpdateStatus | null>;
+        install: () => Promise<boolean>;
+        onStatus: (cb: (status: UpdateStatus) => void) => () => void;
       };
     };
   }

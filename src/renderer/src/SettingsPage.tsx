@@ -6,6 +6,7 @@ import {
   cleanError,
   type AppInfo,
   type BackupSnapshot,
+  type UpdateStatus,
 } from "./api";
 import { ChangePasswordModal, ClearAllModal } from "./Security";
 import type { ToastKind } from "./Toast";
@@ -13,6 +14,55 @@ import type { ToastKind } from "./Toast";
 type Theme = Settings["theme"];
 
 const THEME_LABEL: Record<Theme, string> = { light: "浅色", dark: "深色", system: "跟随系统" };
+
+/** 把更新状态翻成一句人话 —— 界面上只暴露这一个函数, 免得各处各写一套 */
+function updateText(s: UpdateStatus | null): string {
+  if (!s) return "尚未查询";
+  switch (s.phase) {
+    case "idle":
+      return "尚未查询";
+    case "unsupported":
+      return s.error ?? "当前版本不检查更新";
+    case "checking":
+      return "正在检查…";
+    case "uptodate":
+      return `已是最新版本（${s.currentVersion}）`;
+    case "available":
+      return `发现新版本 ${s.version}（当前 ${s.currentVersion}）`;
+    case "downloading":
+      return `正在下载 ${s.version ?? ""}… ${s.percent?.toFixed(0) ?? 0}%`;
+    case "ready":
+      return `新版本 ${s.version} 已下载，重启后生效`;
+    case "error":
+      return `检查更新失败：${s.error ?? "未知原因"}`;
+  }
+}
+
+/**
+ * 更新只有一个按钮, 它的含义随状态走。
+ * 拆成三个按钮(检查/下载/重启)会让其中两个长期处于"点了没用"的灰态,
+ * 不如让按钮自己变成当前唯一该做的那件事。
+ */
+function updateActionLabel(s: UpdateStatus | null): string {
+  switch (s?.phase) {
+    case "ready":
+      return "重启并安装";
+    case "available":
+      return "下载新版本";
+    case "downloading":
+      return `下载中 ${s.percent?.toFixed(0) ?? 0}%`;
+    case "checking":
+      return "检查中…";
+    default:
+      return "检查更新";
+  }
+}
+
+function updateActionStep(s: UpdateStatus | null): "check" | "download" | "install" {
+  if (s?.phase === "ready") return "install";
+  if (s?.phase === "available") return "download";
+  return "check";
+}
 
 function Row(props: { title: string; desc?: string; children: React.ReactNode; stack?: boolean }) {
   return (
@@ -71,12 +121,33 @@ export function SettingsPage(props: {
   const [count, setCount] = useState(0);
   const [pwOpen, setPwOpen] = useState(false);
   const [clearOpen, setClearOpen] = useState(false);
+  const [upd, setUpd] = useState<UpdateStatus | null>(null);
+  const [updBusy, setUpdBusy] = useState(false);
 
   useEffect(() => {
     api.app.info().then(setInfo).catch(() => {});
     api.backup.list().then(setSnaps).catch(() => setSnaps([]));
     api.vault.list().then((l) => setCount(l.length)).catch(() => {});
+    // 先拉一次当前快照, 之后靠主进程推 —— 只拉不推会漏掉"后台检查发现新版本"
+    api.update.status().then(setUpd).catch(() => {});
+    return api.update.onStatus(setUpd);
   }, []);
+
+  async function runUpdate(step: "check" | "download" | "install") {
+    setUpdBusy(true);
+    try {
+      if (step === "install") {
+        await api.update.install();
+        return; // 马上就重启了, 不用再更新状态
+      }
+      const s = await api.update[step]();
+      if (s) setUpd(s);
+    } catch (e) {
+      notify(cleanError(e), "err");
+    } finally {
+      setUpdBusy(false);
+    }
+  }
 
   async function openDir() {
     try {
@@ -382,6 +453,17 @@ export function SettingsPage(props: {
 
       <section className="scard">
         <h2>ℹ 关于</h2>
+        <Row title="软件更新" desc={updateText(upd)} stack>
+          <button
+            className="btn-ghost"
+            disabled={
+              updBusy || upd?.phase === "downloading" || upd?.phase === "unsupported"
+            }
+            onClick={() => void runUpdate(updateActionStep(upd))}
+          >
+            {updateActionLabel(upd)}
+          </button>
+        </Row>
         {info ? (
           <div className="about-grid">
             <div><span>应用版本</span><b>{info.appVersion}</b></div>
