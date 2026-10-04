@@ -70,7 +70,7 @@ if (!fs.existsSync(icon)) {
   // electron-builder 要求 ≥256; macOS 的 icns 从这张图生成, 1024 才够清晰
   else if (size.w < 512 || size.h < 512) {
     errors.push(`build/icon.png 只有 ${size.w}×${size.h}, 打包图标至少要 512×512 (建议 1024×1024)`);
-  } else okList.push(`build/icon.png ${size.w}×${size.h}`);
+  } else okList.push(`build/icon.png ${size.w}×${size.h} —— 由 scripts/gen_pack_icon.py 生成(依赖本机 PySide6, CI 重建不了), 所以必须提交`);
   checkTracked(icon, "打包图标必须进版本库");
 }
 
@@ -102,6 +102,19 @@ if (pkg.version && pkg.build?.appId && pkg.build?.productName && pkg.main) {
 // tests/portable.test.ts 直接读 testdata/test-bulk.csv, 漏提交就是 CI 直接红
 const fixture = path.join(root, "testdata", "test-bulk.csv");
 if (fs.existsSync(fixture)) checkTracked(fixture, "tests/portable.test.ts 直接依赖这份 fixture");
+
+// tests/share.test.ts 的**跨语言互通**用例依赖这份 Python 版导出的分享包。
+// 它同时也是"Node 能解开 Python 写的包"这条结论的物证 —— 丢了就只剩单向验证,
+// 而单向验证证明不了互通。生成方式见 scripts/interop-share.py --gen
+const shareFixture = path.join(root, "testdata", "share-from-python.json");
+if (!fs.existsSync(shareFixture)) {
+  errors.push(
+    "testdata/share-from-python.json 缺失 —— 跨语言互通用例会静默降级。\n" +
+      "     重新生成: cd C:/dev/aegis && uv run python C:/dev/aegis-electron/scripts/interop-share.py --gen",
+  );
+} else {
+  checkTracked(shareFixture, "tests/share.test.ts 的跨语言互通用例直接依赖它");
+}
 
 // ---------- 5. 构建产物 (可选) ----------
 const outDir = path.join(root, "out");

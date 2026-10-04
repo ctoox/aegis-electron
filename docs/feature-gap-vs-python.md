@@ -159,3 +159,35 @@ Python 侧用 `QLocalServer` 或 `CreateMutexW`（命名互斥量，名字里带
 > 定位：技术选型对比样本，非完整替代品。
 
 顶层 `aegis/README.md:396` 那句「功能对齐（解锁 / 增删改 / 导入导出 / 自动填充设置）」也只对 Web 端成立，不适用于 Electron 端。
+
+---
+
+## 九、收尾状态（2026-10-04）
+
+**P0 + P1 共 7 项已全部落地**，本报告从「排查清单」转为「已闭合记录」。
+
+| 项 | 落点 | 验证方式 |
+|---|---|---|
+| 单实例保护 | `src/main/index.ts` `requestSingleInstanceLock` + `second-instance` | `npm run smoke` 实测：A 存活、B 自行退出 code=0、A 未被顶掉 |
+| 修改主密码 | `VaultStore.changePassword` + `vault:changePassword` + `Security.tsx` | `tests/vault-ops.test.ts`：条目明文一条没变、旧密码失效 |
+| 重置密码库 | `VaultStore.reset`（静态）+ `vault:reset`（**不需要解锁**，从解锁页进） | 同上：旧主密码彻底失效、旧库备份仍可用旧密码打开 |
+| 清空全部条目 | `VaultStore.clearAll`（先 `backupNow` 强制快照） | 同上：存在一份清空前的快照能原样打开 |
+| 历史版本与回滚 | `src/core/history.ts` + `HistoryModal.tsx` | 同上 + 截图：`.hist-item` 出现、标出「与当前相比：密码不同」 |
+| 加密分享包 | `src/core/share.ts` + `ShareModals.tsx` | `tests/share.test.ts` 42 项，含**双向跨语言互通** |
+| 系统托盘 | `buildTray()` + `closeToTray` 设置项 | 截图 + `build/icon.png` 已显式加入 `build.files` |
+
+**新增的库文件快照**（`src/core/backup.ts`）是本轮顺带补上的第八项 —— 它不在原报告的 P0/P1 里，
+但「重置 / 清空 / 改密码」三个破坏性操作都需要一个可回退的落点，否则三项都只做了一半。
+
+### 与原报告结论不同的两处
+
+1. **原报告说「README 表述需修正」，改法不同**。没有改成「功能覆盖为子集」（已不成立），
+   而是改成如实描述：同 UI 设计稿、分享包线格式互通、**库文件格式仍不互通**。
+   真正剩下的差异是**存储格式**，不是功能。
+2. **原报告列的「9 项缺失」里有一项判断有误**：宣称缺的 `get(id)` 实际只是没暴露成方法，
+   改动量远小于预估。已在 `VaultStore` 补上。
+
+### 仍未做
+
+- `README.md` 之外，顶层 `aegis/README.md:396` 那句「功能对齐」仍未修正（只对 Web 端成立）。
+- Python 侧的单实例保护（`QLocalServer` / 命名互斥量）未做 —— 本轮范围只覆盖 Electron 版。
