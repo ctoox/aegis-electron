@@ -515,6 +515,36 @@ async function main() {
     const n2 = await countPanel();
     check(n2 === 1, `连开两次仍是 1 个面板窗口, 没有叠窗 (实际 ${n2})`);
 
+    // (4b) 面板**自己**那个渲染进程里, 条目真的渲染成了行。
+    //   上面几条只能证明"窗口在、数据在", 证明不了"界面画出来了" ——
+    //   列表为空时面板会显示 .fp-empty, 那是另一条分支, 必须分开断言。
+    //   顺便拍一张图: 这个界面此前从来没人看过长什么样。
+    const panelTarget = (await (await fetch(`http://127.0.0.1:${PORT}/json`)).json()).find(
+      (t) => t.type === "page" && String(t.url).includes("#/fill"),
+    );
+    const panelCdp = await Cdp.connect(panelTarget.webSocketDebuggerUrl);
+    try {
+      check(await waitFor(panelCdp, ".fillpanel", 5000), "面板 React 已挂载 (.fillpanel)");
+      await sleep(400);
+      const panelDom = JSON.parse(
+        String(
+          await panelCdp.js(`
+            return JSON.stringify({
+              rows: document.querySelectorAll(".fp-row").length,
+              empty: document.querySelectorAll(".fp-empty").length,
+              tag: (document.querySelector(".fp-tag") || {}).textContent || "",
+            });
+          `),
+        ),
+      );
+      console.log(`    · 面板渲染 ${panelDom.rows} 行, 首行填法标签 = 「${panelDom.tag}」`);
+      check(panelDom.rows >= 1, `面板把条目渲染成了行 (实际 ${panelDom.rows} 行)`);
+      check(panelDom.empty === 0, "面板没有落到「无条目」空状态");
+      await panelCdp.shot(path.join(OUT, "10-fillpanel.png"));
+    } finally {
+      panelCdp.close();
+    }
+
     // (5) ★ 「失焦即锁」不被自己弹出的面板触发 (AUTOTYPE-DESIGN §5.5)
     //     旧代码里主窗口的 blur 处理器无条件锁库, 而面板抢焦点必然触发 blur ——
     //     结果是"一开快速填充就把自己的库锁了"。这条探针就是那个 bug 的回归护栏。

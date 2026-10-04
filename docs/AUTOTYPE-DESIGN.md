@@ -731,7 +731,12 @@ if (process.platform === "win32") {
 | 面板不泄露密码 | 调 `atype:entries`，断言返回对象**没有任何** `password` 键（5.3 的回归护栏）| 在 `fillItems()` 里加回 `password: e.password` → ✘ |
 | 不可用时不崩 | `available()` 返回 `{ok, reason}`，`ok` 为假时 `reason` 非空；`atype:run` 对不存在的条目返回 `{ok:false, how:"failed"}` 而不抛 | 断言的是「不抛」，靠类型收紧来保证 |
 | 面板是独立窗口、不叠窗 | 唤出前 `#/fill` 目标数 = 0，唤出后 = 1，**再唤出一次仍是 1** | 人工清单第 7 条的自动化 |
+| 面板真的画出来了 | 连到**面板自己的**渲染目标，断言 `.fp-row` ≥ 1 且**没有**落到 `.fp-empty` | 把 `shown.length > 0` 改成 `< 0`（强制走空状态分支）→ ✘ |
 | **失焦即锁不被面板触发** | 开 `lockOnBlur` → 收起面板并用 `Page.bringToFront` 把主窗口拉回前台 → 唤出面板 → 断言 `vault.status().unlocked` **仍为 true**（5.5 的回归护栏）| 删掉 `index.ts` 里的 `if (isPanelVisible()) return;` → ✘ |
+
+第 4 条是后补的：前三条只能证明「窗口在、数据对」，证明不了「界面画出来了」——
+列表为空时面板走的是 `.fp-empty` 那条分支，两种结局必须分开断言。
+顺手在同一个目标上截一张 `10-fillpanel.png`，这是面板 UI 唯一一次被人看过。
 
 **这条探针自己踩过一次坑，值得写下来**：第一版没有「先收起面板、把主窗口拉回前台」这一步，
 结果上一条探针留下的面板让主窗口**一直处于失焦状态**，`open()` 不会再产生第二次 `blur`，
@@ -780,7 +785,7 @@ Windows 真机上逐项：
 
 1. `npm run ci` 通过（含新增的 `tests/autotype.test.ts`）；
 2. `npm run check:purity` **仍通过** —— `src/core/autotype.ts` 是纯模块，注入能力只在主进程可达；
-3. 12.2 的四个探针全部 ✔，且每个都在旧代码上验证过会 ✘；
+3. 12.2 的五组探针全部 ✔，且每一组都在旧代码上验证过会 ✘；
 4. 12.3 的人工清单 9 项全过，其中第 5、6、8 项**必须**明确验证（它们是降级路径与冲突修复）；
 5. `docs/feature-gap-vs-python.md` / `docs/OPENSOURCE_FEATURES.md` / `README.md` 三处按第 9 节改写完毕；
 6. 非 Windows 平台上：面板可正常唤出与搜索，「填入」按钮禁用、tooltip 指向「复制密码」，**不出现任何报错或空白窗口**。
