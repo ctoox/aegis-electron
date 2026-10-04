@@ -59,6 +59,16 @@ async function main() {
   ok(typeof native.foregroundWindow === "function", "foregroundWindow 已导出");
   ok(typeof native.setForeground === "function", "setForeground 已导出");
   ok(typeof native.windowTitle === "function", "windowTitle 已导出");
+  // ⚠ 上面五条 typeof 检查**抓不到属性位陷阱**：napi_default(=0) 让方法
+  //   能调用但不可枚举，属性访问一切正常，只有枚举会翻车 ——
+  //   `Object.keys(addon)` 得到 []、`{...addon}` 得到 {}。
+  //   所以必须单独盯着 enumerable（autotype.cc 里显式写了 napi_enumerable）。
+  const keys = Object.keys(native).sort();
+  ok(keys.length === 6, `导出可枚举 —— Object.keys 拿到 ${keys.length} 个（属性位陷阱的回归护栏）`);
+  ok(
+    keys.join(",") === "available,foregroundWindow,sendKey,sendText,setForeground,windowTitle",
+    `Object.keys 列出的正是那六个：${keys.join(", ") || "(空)"}`,
+  );
   const av = native.available();
   ok(typeof av?.ok === "boolean" && typeof av?.reason === "string", "available() 返回 {ok, reason}");
   console.log(`     available() = ${JSON.stringify(av)}`);

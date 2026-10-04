@@ -333,13 +333,18 @@ static napi_value WindowTitle(napi_env env, napi_callback_info info) {
 /* ============================================================ 模块注册 */
 
 NAPI_MODULE_INIT() {
+  /* napi_default 是 0 —— 三个属性位（writable / enumerable / configurable）全关。
+   * 全关的后果不是"更安全"，而是**诡异**：方法照常能调用，
+   * 但 `Object.keys(addon)` 返回空数组、`{...addon}` 得到空对象 —— 谁写一句
+   * `console.log(Object.keys(require(...)))` 自检都会以为模块没导出东西。
+   * 所以这里显式打开 enumerable（保持只读：这几个函数没必要让外部改写）。 */
   napi_property_descriptor props[] = {
-      {"available", 0, Available, 0, 0, 0, napi_default, 0},
-      {"sendText", 0, SendText, 0, 0, 0, napi_default, 0},
-      {"sendKey", 0, SendKey, 0, 0, 0, napi_default, 0},
-      {"foregroundWindow", 0, ForegroundWindow, 0, 0, 0, napi_default, 0},
-      {"setForeground", 0, SetForeground, 0, 0, 0, napi_default, 0},
-      {"windowTitle", 0, WindowTitle, 0, 0, 0, napi_default, 0},
+      {"available", 0, Available, 0, 0, 0, napi_enumerable, 0},
+      {"sendText", 0, SendText, 0, 0, 0, napi_enumerable, 0},
+      {"sendKey", 0, SendKey, 0, 0, 0, napi_enumerable, 0},
+      {"foregroundWindow", 0, ForegroundWindow, 0, 0, 0, napi_enumerable, 0},
+      {"setForeground", 0, SetForeground, 0, 0, 0, napi_enumerable, 0},
+      {"windowTitle", 0, WindowTitle, 0, 0, 0, napi_enumerable, 0},
   };
   napi_define_properties(env, exports, sizeof(props) / sizeof(props[0]), props);
   return exports;
