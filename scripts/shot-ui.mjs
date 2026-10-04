@@ -437,7 +437,9 @@ async function main() {
     //      上面两个弹窗步骤已经各自验过了) ----
     console.log("\n设置页新增样式类");
     const cls = await cdp.js(`
-      const want = ["sec-divider", "snap-list", "snap-act", "btn-danger"];
+      // sec-hint / at-hotkey / at-flag 是「⌨ 快速填充」那一节的 ——
+      // 光看 settings-page 渲染出来不算数, 得确认那一节真的进了 DOM。
+      const want = ["sec-divider", "snap-list", "snap-act", "btn-danger", "sec-hint", "at-hotkey", "at-flag"];
       const html = document.documentElement.outerHTML;
       return want.map((c) => c + "=" + html.includes(c)).join(" ");
     `);
@@ -447,7 +449,107 @@ async function main() {
       check(ok === "true", `设置页 DOM 里出现 ${name}`);
     }
 
-    // ---- 9. 改提示 → 锁库 → 解锁页必须显示【新】提示 ----
+    // ---- 9. 快速填充（Auto-Type）----
+    //   这一组是**安全护栏**: "面板看不到密码"和"面板弹出来不会把自己的库锁掉"
+    //   都属于"改坏了不会报错、只会静默变危险"的那一类, 必须由脚本盯着。
+    //   设计依据: docs/AUTOTYPE-DESIGN.md §5.3 / §5.5 / §12.2
+    console.log("\n快速填充（Auto-Type）");
+
+    // (1) 面板是"密码盲"的 —— atype:entries 的返回对象里不许出现 password 键
+    const blind = JSON.parse(
+      String(
+        await cdp.js(`
+          return (async () => {
+            const list = await window.api.atype.entries();
+            const leaked = list.filter((e) => Object.prototype.hasOwnProperty.call(e, "password"));
+            return JSON.stringify({
+              n: list.length,
+              leaked: leaked.length,
+              keys: list.length ? Object.keys(list[0]).sort().join("/") : "",
+            });
+          })();
+        `),
+      ),
+    );
+    console.log(`    · 面板拿到 ${blind.n} 条, 字段 = ${blind.keys}`);
+    check(blind.n > 0, "演示库里有可填充条目 (否则下面那条是空转)");
+    check(blind.leaked === 0, "★ atype:entries 不含 password 字段 (面板是密码盲的)");
+
+    // (2) 可用性必须是"能/不能 + 非空原因", 界面要靠 reason 显示为什么会降级
+    const av = JSON.parse(String(await cdp.js(`return (async () => JSON.stringify(await window.api.atype.available()))();`)));
+    console.log(`    · available = ${JSON.stringify(av)}`);
+    check(typeof av.ok === "boolean", "available() 返回 ok 布尔");
+    check(av.ok || String(av.reason).length > 0, "不可用时必须给出非空原因 (设置页要显示它)");
+
+    // (3) 条目不存在时不许抛 —— 面板传进来的 id 可能是刚被删掉的
+    const bad = JSON.parse(
+      String(
+        await cdp.js(`
+          return (async () => {
+            try {
+              const r = await window.api.atype.run("no-such-entry-id", null);
+              return JSON.stringify({ threw: false, r });
+            } catch (e) {
+              return JSON.stringify({ threw: true, msg: String(e && e.message) });
+            }
+          })();
+        `),
+      ),
+    );
+    check(bad.threw === false, `条目不存在时 atype:run 不抛错${bad.threw ? ` (实际抛了: ${bad.msg})` : ""}`);
+    check(bad.r && bad.r.ok === false, "条目不存在时返回 {ok:false, how:...} 而不是抛");
+
+    // (4) 面板是独立窗口, 且连开两次不会叠出第二个 (人工清单第 7 条自动化)
+    const countPanel = async () => {
+      const res = await fetch(`http://127.0.0.1:${PORT}/json`);
+      const list = await res.json();
+      return list.filter((t) => t.type === "page" && String(t.url).includes("#/fill")).length;
+    };
+    check((await countPanel()) === 0, "唤出之前没有 #/fill 面板窗口 (预置条件)");
+    check((await cdp.js(`return window.api.atype.open()`)) === true, "面板已唤出");
+    await sleep(500);
+    const n1 = await countPanel();
+    check(n1 === 1, `面板作为独立窗口存在, 且只有 1 个 (实际 ${n1})`);
+    check((await cdp.js(`return window.api.atype.open()`)) === true, "再唤出一次");
+    await sleep(500);
+    const n2 = await countPanel();
+    check(n2 === 1, `连开两次仍是 1 个面板窗口, 没有叠窗 (实际 ${n2})`);
+
+    // (5) ★ 「失焦即锁」不被自己弹出的面板触发 (AUTOTYPE-DESIGN §5.5)
+    //     旧代码里主窗口的 blur 处理器无条件锁库, 而面板抢焦点必然触发 blur ——
+    //     结果是"一开快速填充就把自己的库锁了"。这条探针就是那个 bug 的回归护栏。
+    //
+    //     ⚠ 必须先收起面板、把主窗口拉回前台, 否则"失焦"是上一步 (4) 留下的状态:
+    //     面板还开着时再 open() 不会产生第二次 blur, 断言就成了空转。
+    //     这不是假想 —— 第一版探针就这么写的, 在"故意删掉让路逻辑"的代码上照样绿。
+    await cdp.js(`return window.api.atype.cancel()`);
+    await sleep(600);
+    await cdp.send("Page.bringToFront");
+    await sleep(600);
+    check((await cdp.js(`return document.hasFocus()`)) === true, "预置条件: 主窗口已回到前台并持有焦点");
+    await cdp.js(`return window.api.settings.set({ lockOnBlur: true })`);
+    await sleep(300);
+    await cdp.js(`return window.api.atype.open()`);
+    await sleep(1200);
+    const blurProbe = JSON.parse(
+      String(
+        await cdp.js(`
+          return (async () => JSON.stringify({
+            mainFocused: document.hasFocus(),
+            unlocked: (await window.api.vault.status()).unlocked,
+          }))();
+        `),
+      ),
+    );
+    console.log(`    · 主窗口失焦=${!blurProbe.mainFocused} · 库仍解锁=${blurProbe.unlocked}`);
+    // 反空转: 主窗口要是没失焦, 下面那条断言就是白过
+    check(blurProbe.mainFocused === false, "预置条件: 面板弹出后主窗口确实失去了焦点");
+    check(blurProbe.unlocked === true, "★ 开了「失焦即锁」时弹出填充面板, 库仍然保持解锁");
+    await cdp.js(`return window.api.settings.set({ lockOnBlur: false })`);
+    await cdp.js(`return window.api.atype.cancel()`); // 收起面板, 别影响后面的步骤
+    await sleep(300);
+
+    // ---- 10. 改提示 → 锁库 → 解锁页必须显示【新】提示 ----
     //   这是本 bug 的正面复现。旧代码只在启动时读一次 hint, 所以"改提示 → 锁库"
     //   之后解锁页显示的还是旧值, 用户看到的就是"提示改不动"。
     //   这里只比对新旧不等的两个值才有意义(改完再锁库显示旧值 = 复现)。

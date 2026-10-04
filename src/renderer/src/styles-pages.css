@@ -1126,6 +1126,56 @@ input[type="range"] {
   color: var(--danger);
 }
 
+/* 分节开头的一段引导语 (放在 .scard h2 与第一个 .srow 之间) */
+.sec-hint {
+  margin: 0;
+  padding-bottom: 12px;
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--text-3);
+}
+
+.sec-hint b {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* 「快速填充」的热键展示行: 键帽 + 注册状态旗子 */
+.at-hotkey {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.at-hotkey code {
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--field);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+
+.at-flag {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-3);
+}
+
+.at-flag.ok {
+  color: var(--ok);
+}
+
+.at-flag.warn {
+  color: var(--warn);
+}
+
+.at-flag.off {
+  color: var(--text-3);
+}
+
 .srow-ctl .btn-danger {
   padding: 8px 16px;
   border-radius: var(--r-md);
@@ -1331,4 +1381,186 @@ input[type="range"] {
 
 .gate-forgot:hover {
   color: var(--danger);
+}
+
+/* ============================================================ 快速填充面板
+ *
+ * 这是一个**独立窗口**（index.html#/fill），宽 468、高随内容。
+ * 刻意直角 + 细边框、不用透明圆角：项目里吃过"无边框窗口在远控采集下
+ * 黑屏/不可见"的亏，少一个平台相关的失败模式值。
+ * 高度由 FillPanel 量好上报主进程（atype:resize），所以这里不要写死高度。
+ */
+
+.fillpanel-wrap {
+  padding: 8px;
+  width: 100%;
+}
+
+.fillpanel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* 顶部：目标窗口回显。Auto-Type 没有域绑定，这是用户唯一的"我正填向哪"线索 */
+.fp-target {
+  font-size: 12px;
+  color: var(--text-2);
+  background: var(--field);
+  border-radius: var(--r-sm);
+  padding: 6px 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fp-target b {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.fp-target.warn {
+  color: var(--text);
+  background: color-mix(in srgb, var(--warn) 16%, var(--field));
+}
+
+.fp-search {
+  height: 34px;
+  border: 1px solid var(--border);
+  background: var(--field);
+  border-radius: var(--r-md);
+  padding: 0 10px;
+  font-size: 13px;
+  color: var(--text);
+  outline: none;
+  width: 100%;
+}
+
+.fp-search:focus {
+  border-color: var(--accent);
+  background: var(--surface);
+}
+
+.fp-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.fp-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: var(--r-md);
+  text-align: left;
+  width: 100%;
+}
+
+.fp-row.active {
+  background: var(--accent-soft);
+}
+
+:root[data-theme="dark"] .fp-row.active {
+  background: color-mix(in srgb, var(--accent) 26%, transparent);
+}
+
+.fp-col {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+
+.fp-t {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fp-s {
+  font-size: 12px;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fp-tag {
+  font-size: 11px;
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+
+.fp-empty {
+  font-size: 12px;
+  color: var(--text-3);
+  line-height: 1.6;
+  padding: 8px 4px;
+}
+
+.fp-preview {
+  font-size: 11px;
+  color: var(--text-3);
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  background: var(--field);
+  border-radius: var(--r-sm);
+  padding: 5px 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fp-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.fp-btn {
+  height: 30px;
+  padding: 0 14px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.fp-btn:hover:not(:disabled) {
+  background: var(--field);
+}
+
+.fp-btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.fp-btn.primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.fp-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* 提示行 —— 与面板同宽时两行放得下, 不要用 nowrap */
+.fp-hint {
+  font-size: 11px;
+  color: var(--text-3);
+  line-height: 1.7;
+}
+
+.fp-hint b {
+  color: var(--text-2);
+  font-weight: 600;
 }

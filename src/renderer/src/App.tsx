@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { EntryWithStrength } from "../../core/types";
 import { analyzeLocal } from "../../core/health";
 import { FORMATS, type FormatId } from "../../core/formats";
-import { DEFAULT_SETTINGS, type Settings } from "../../core/prefs";
+import { DEFAULT_SETTINGS, hotkeyLabel, type Settings } from "../../core/prefs";
 import { api, cleanError, type ImportCandidate } from "./api";
 import type { ShareCandidate } from "./api";
 import { BulkDeleteModal } from "./BulkDelete";
@@ -283,6 +283,13 @@ export default function App() {
   // ---- 剪贴板被定时清空 ----
   useEffect(() => {
     return api.app.onClipboardCleared(() => notify("剪贴板已自动清空", "info"));
+  }, [notify]);
+
+  // ---- 快速填充的结果提示 ----
+  // 填充常常发生在主窗口被最小化到托盘的时候，所以主进程那边同时也会写日志；
+  // 这条订阅只负责"用户在看着主窗口"时给个明确交代。
+  useEffect(() => {
+    return api.atype.onNotice((msg) => notify(msg, "info"));
   }, [notify]);
 
   async function onGateDone() {
@@ -646,6 +653,16 @@ export default function App() {
               </button>
               <button className="nav-item" onClick={() => setCmdOpen(true)}>
                 <span>⌘</span> 命令面板 <span className="cnt">Ctrl K</span>
+              </button>
+              <button
+                className="nav-item"
+                onClick={() => void api.atype.open(sel?.title ?? "")}
+                title="把账号密码自动打到别的窗口（也可用全局快捷键）"
+              >
+                <span>⌨</span> 快速填充
+                {settings.autotypeEnabled && settings.autotypeHotkey && (
+                  <span className="cnt">{hotkeyLabel(settings.autotypeHotkey, isMac ? "darwin" : "win32")}</span>
+                )}
               </button>
               <button className="nav-item" onClick={cycleTheme}>
                 <span>{theme === "light" ? "☀" : theme === "dark" ? "☾" : "◐"}</span>

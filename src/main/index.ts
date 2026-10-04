@@ -63,6 +63,7 @@ import {
 } from "../core/settings";
 import type { Entry, VaultStatus } from "../core/types";
 import { Updater } from "./updater";
+import { registerAutotype, isPanelVisible, shutdownAutotype } from "./autotype";
 
 let vault: VaultStore | null = null;
 let mainWindow: BrowserWindow | null = null;
@@ -70,6 +71,8 @@ let tray: Tray | null = null;
 let settings: Settings = { ...DEFAULT_SETTINGS };
 /** 自动更新。打包态才构造 (开发态 npm run dev 不该去查线上版本) */
 let updater: Updater | null = null;
+/** 快速填充编排层 (app ready 之后才有) */
+let autotype: ReturnType<typeof registerAutotype> | null = null;
 /** 真正要退出时才置 true —— 区分「关窗进托盘」与「退出应用」 */
 let isQuitting = false;
 
@@ -198,6 +201,11 @@ function createWindow(): void {
 
   // 失焦即锁 (可选)
   win.on("blur", () => {
+    // 填充面板是**独立窗口**，一显示就抢走主窗口焦点。不在这里让路的话，
+    // 开了「失焦即锁」的用户会在正要填密码的瞬间被锁出去 —— 这不是理论问题，
+    // 是必然发生（docs/AUTOTYPE-DESIGN.md 5.5）。
+    // scripts/shot-ui.mjs 有一条探针专门盯这个（"开了失焦即锁时弹出填充面板，库仍解锁"）。
+    if (isPanelVisible()) return;
     if (settings.lockOnBlur && vault?.unlocked) lockVault("blur");
   });
 
@@ -249,6 +257,9 @@ function lockVault(reason: LockReason): VaultStatus {
   vault?.lock();
   vault = null;
   if (settings.clearClipboardOnLock) wipeClipboard(true);
+  // 锁库时把「等待选目标」也停掉 —— 否则 10 秒内点到某个窗口，
+  // 会往那儿打一个已经锁了的库的密码
+  autotype?.cancelPending();
   mainWindow?.webContents.send("vault:locked", reason);
   refreshTrayMenu();
   return vaultStatus();
@@ -315,6 +326,19 @@ function copyToClipboard(text: string): { clearIn: number } {
     }, secs * 1000);
   }
   return { clearIn: secs };
+}
+
+/**
+ * 往渲染层推一条提示（App.tsx 用现有的 Toast 显示）。
+ * 主窗口不在时退化成写日志 —— 快速填充常常发生在主窗口被最小化到托盘的时候，
+ * 至少留个痕迹，别静默。
+ */
+function notifyRenderer(msg: string): void {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("atype:notice", msg);
+  } else {
+    console.log(`[autotype] ${msg}`);
+  }
 }
 
 // ============================================================ 系统托盘
@@ -444,6 +468,23 @@ if (!hasSingleInstanceLock) {
     buildTray();
     startLockWatcher();
 
+    // —— 快速填充（Auto-Type）——
+    // 面板窗口**不在这里建**：它到第一次唤出时才 lazy 创建，
+    // 免得每个用户启动时都白付一个渲染进程的内存。
+    autotype = registerAutotype({
+      getVault: () => vault,
+      getSettings: () => settings,
+      getMainWindow: () => mainWindow,
+      copyToClipboard,
+      touch,
+      notify: notifyRenderer,
+    });
+    if (settings.autotypeEnabled) {
+      const r = autotype.applyHotkey(settings.autotypeHotkey, () => void autotype?.openPanel());
+      // 注册失败不能静默 —— 设置页会读 hotkeyStatus() 显示"已被占用"
+      if (!r.ok) console.warn(`[autotype] 全局快捷键未注册：${r.reason}`);
+    }
+
     // —— 自动更新 ——
     // 只在打包态构造。检查延后 10 秒: 启动那一瞬间在抢磁盘 IO (解锁页、读设置),
     // 再叠一个网络请求只会让冷启动更慢, 而且用户这时候也不关心有没有新版本。
@@ -466,6 +507,11 @@ if (!hasSingleInstanceLock) {
   // 把「退出神盾」也挡下来, 应用永远退不掉
   app.on("before-quit", () => {
     isQuitting = true;
+  });
+
+  // 摘掉全局快捷键 + 销毁面板。做晚了会让系统以为某个组合键一直被按着
+  app.on("will-quit", () => {
+    shutdownAutotype();
   });
 
   app.on("window-all-closed", () => {
@@ -938,8 +984,22 @@ ipcMain.handle("portable:export", async (_e, format: FormatId) => {
 // ---- IPC: 设置 ----
 ipcMain.handle("settings:get", () => settings);
 ipcMain.handle("settings:set", (_e, patch: Partial<Settings>) => {
+  const prevHotkey = settings.autotypeHotkey;
+  const prevEnabled = settings.autotypeEnabled;
   settings = saveSettings(userDataDir, patch ?? {});
   // 改完锁定策略立刻按新值判断一次, 不用等下一分钟
   touch();
+
+  // 快捷键或总开关变了就重新注册（注册结果由设置页读 atype:hotkeyStatus 显示）。
+  // 只有真的变了才动 —— 否则每改一个无关设置都会先解绑再绑定，
+  // 那一瞬间的热键是失效的。
+  if (autotype && (settings.autotypeHotkey !== prevHotkey || settings.autotypeEnabled !== prevEnabled)) {
+    if (settings.autotypeEnabled) {
+      const r = autotype.applyHotkey(settings.autotypeHotkey, () => void autotype?.openPanel());
+      if (!r.ok) console.warn(`[autotype] 全局快捷键未注册：${r.reason}`);
+    } else {
+      autotype.applyHotkey("", () => {});
+    }
+  }
   return settings;
 });

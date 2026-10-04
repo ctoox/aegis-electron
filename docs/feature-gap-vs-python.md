@@ -120,7 +120,7 @@ Electron 版：同样没有。设置页「数据」节只有 导入 / 导出 / �
 |---|---|---|
 | 全局热键 | 中 | `globalShortcut.register()`，但**沙箱/权限在部分平台要额外处理** |
 | Windows Hello 解锁 | 大 | Electron 侧需要 native 模块（`node-ffi` 或自写 addon）走 WinRT `UserConsentVerifier`，是这 9 项里最重的 |
-| 快速填充 / 自动填充 | 很大 | 要模拟键盘输入到别的窗口，Electron 无原生能力，得装 native 依赖（类似 `node-key-sender`），**且和「不注入输入事件」的测试约定冲突** |
+| 快速填充 / 自动填充 | 很大 | 要模拟键盘输入到别的窗口，Electron 无原生能力，得装 native 依赖。**已实现（阶段 1，仅 Windows）**：自写最小 N-API 模块 `native/autotype-win32`，既不用 `node-key-sender`（要 JRE、每次填字还 spawn 进程）也不用 `nut-js`（商业许可）。渲染层仍然不碰输入注入 —— 注入只发生在主进程，`check:purity` 照旧全绿。设计见 `docs/AUTOTYPE-DESIGN.md` |
 
 ## 七、⚠️ 顺带发现的严重缺陷：没有单实例保护
 

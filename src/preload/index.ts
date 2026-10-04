@@ -81,6 +81,39 @@ const api = {
   health: {
     report: (deep: boolean) => ipcRenderer.invoke("health:report", deep),
   },
+  /**
+   * 快速填充（Auto-Type）。设计见 docs/AUTOTYPE-DESIGN.md。
+   *
+   * 注意 `entries()` 返回的条目**不含 password 字段** —— 面板是"密码盲"的，
+   * 明文密码只在主进程里取用。想加字段前先读该文档 5.3。
+   */
+  atype: {
+    available: () => ipcRenderer.invoke("atype:available"),
+    entries: () => ipcRenderer.invoke("atype:entries"),
+    preview: (id: string, mode: string | null) => ipcRenderer.invoke("atype:preview", id, mode),
+    /** 执行填充。mode 为 null 表示"按条目自己的填法" */
+    run: (id: string, mode: string | null) => ipcRenderer.invoke("atype:run", id, mode),
+    cancel: () => ipcRenderer.invoke("atype:cancel"),
+    /** 面板把内容高度报给主进程，主进程据此调窗口大小 */
+    resize: (contentHeight: number) => ipcRenderer.invoke("atype:resize", contentHeight),
+    /** 拉一次当前唤出状态（挂载时用，防止监听注册晚于 main 的 send） */
+    armState: () => ipcRenderer.invoke("atype:armState"),
+    /** 从界面里唤起面板（热键之外的另一条入口）；preselect 一般是当前条目标题 */
+    open: (preselect?: string) => ipcRenderer.invoke("atype:open", preselect),
+    hotkeyStatus: () => ipcRenderer.invoke("atype:hotkeyStatus"),
+    /** 每次唤出时主进程推来的状态（目标窗口标题、能不能打字…） */
+    onArm: (cb: (arm: unknown) => void) => {
+      const h = (_e: unknown, arm: unknown) => cb(arm);
+      ipcRenderer.on("atype:arm", h);
+      return () => ipcRenderer.removeListener("atype:arm", h);
+    },
+    /** 主进程的操作结果提示（已填入 / 已改为复制…），主窗口用它显示 Toast */
+    onNotice: (cb: (msg: string) => void) => {
+      const h = (_e: unknown, msg: string) => cb(msg);
+      ipcRenderer.on("atype:notice", h);
+      return () => ipcRenderer.removeListener("atype:notice", h);
+    },
+  },
   portable: {
     formats: () => ipcRenderer.invoke("portable:formats"),
     pickImport: () => ipcRenderer.invoke("portable:pickImport"),

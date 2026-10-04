@@ -31,7 +31,7 @@
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit",
-    "test": "tsx tests/vault.test.ts && tsx tests/vault-ops.test.ts && tsx tests/share.test.ts && tsx tests/totp.test.ts && tsx tests/health.test.ts && tsx tests/hibp.test.ts && tsx tests/portable.test.ts && tsx tests/settings.test.ts",
+    "test": "tsx tests/vault.test.ts && tsx tests/vault-ops.test.ts && tsx tests/share.test.ts && tsx tests/totp.test.ts && tsx tests/health.test.ts && tsx tests/hibp.test.ts && tsx tests/portable.test.ts && tsx tests/settings.test.ts && tsx tests/autotype.test.ts",
     "check:purity": "tsx scripts/check-renderer-purity.ts",
     "check:assets": "tsx scripts/check-package-assets.ts",
     "check:share-interop": "echo \"跨实现互通测试：需要另一实现（Python 版）的环境，该实现不在本仓库内。用法见 scripts/interop-share.py 文件头。\"",
@@ -39,11 +39,12 @@
     "shot:ui": "node scripts/shot-ui.mjs",
     "seed:visual": "tsx scripts/seed-visual-demo.ts",
     "list:asar": "node scripts/list-asar.mjs",
+    "build:native": "node scripts/build-native.mjs",
     "ci": "npm run typecheck && npm run check:purity && npm run check:assets && npm test",
-    "dist:win": "electron-vite build && electron-builder --win",
+    "dist:win": "npm run build:native && electron-vite build && electron-builder --win",
     "dist:mac": "electron-vite build && electron-builder --mac",
     "dist:linux": "electron-vite build && electron-builder --linux",
-    "dist:all": "electron-vite build && electron-builder --win --mac --linux"
+    "dist:all": "npm run build:native && electron-vite build && electron-builder --win --mac --linux"
   },
   "build": {
     "appId": "com.aegis.aegisnext",

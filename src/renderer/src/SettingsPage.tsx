@@ -1,11 +1,23 @@
 import { useEffect, useState } from "react";
 import { FORMATS, type FormatId } from "../../core/formats";
-import { AUTO_LOCK_CHOICES, CLIP_CLEAR_CHOICES, type Settings } from "../../core/prefs";
+import {
+  AUTO_LOCK_CHOICES,
+  AUTOTYPE_DELAY_CHOICES,
+  CLIP_CLEAR_CHOICES,
+  FILL_HINTS,
+  FILL_LABELS,
+  FILL_MODES,
+  hotkeyLabel,
+  type FillMode,
+  type Settings,
+} from "../../core/prefs";
 import {
   api,
   cleanError,
   type AppInfo,
   type BackupSnapshot,
+  type HotkeyStatus,
+  type NativeAvailability,
   type UpdateStatus,
 } from "./api";
 import { ChangePasswordModal, ClearAllModal } from "./Security";
@@ -62,6 +74,31 @@ function updateActionStep(s: UpdateStatus | null): "check" | "download" | "insta
   if (s?.phase === "ready") return "install";
   if (s?.phase === "available") return "download";
   return "check";
+}
+
+/**
+ * 快速填充那一节的热键状态旗子。
+ *
+ * 「用户自己关掉了」和「注册失败」必须渲染成两种东西 —— 否则用户看到热键不生效，
+ * 分不清是被别的程序抢了，还是压根没开。前者给原因，后者给"功能已关闭"。
+ *
+ * 注意读的是**注册成功的那个键**（`st.hotkey`）而不是设置里存的值：两者不一致正是
+ * "设置改了但注册失败了"这种情况，界面上要看出差别。
+ */
+function hotkeyFlag(
+  enabled: boolean,
+  st: HotkeyStatus | null,
+  accel: string,
+  isMac: boolean,
+): { cls: string; text: string } {
+  const plat = isMac ? "darwin" : "win32";
+  if (!enabled) return { cls: "at-flag off", text: "功能已关闭，全局快捷键未注册" };
+  if (!st) return { cls: "at-flag", text: "正在读取注册状态…" };
+  if (st.registered) {
+    return { cls: "at-flag ok", text: `已注册 · 按下 ${hotkeyLabel(st.hotkey, plat)} 唤出面板` };
+  }
+  const why = st.reason || `未能注册 ${hotkeyLabel(accel, plat)}`;
+  return { cls: "at-flag warn", text: `${why} —— 仍可从侧栏「快速填充」按钮唤出` };
 }
 
 function Row(props: { title: string; desc?: string; children: React.ReactNode; stack?: boolean }) {
@@ -125,16 +162,30 @@ export function SettingsPage(props: {
   const [clearOpen, setClearOpen] = useState(false);
   const [upd, setUpd] = useState<UpdateStatus | null>(null);
   const [updBusy, setUpdBusy] = useState(false);
+  /** 快速填充：全局热键的注册结果 / 原生模块是否可用 */
+  const [atHotkey, setAtHotkey] = useState<HotkeyStatus | null>(null);
+  const [atAvail, setAtAvail] = useState<NativeAvailability | null>(null);
+  /** 渲染快捷键标签要按平台换 ⌘/Ctrl —— 本页自己拉一次，不依赖上层 */
+  const [isMac, setIsMac] = useState(false);
 
   useEffect(() => {
     api.app.info().then(setInfo).catch(() => {});
     api.backup.list().then(setSnaps).catch(() => setSnaps([]));
     api.vault.list().then((l) => setCount(l.length)).catch(() => {});
     api.vault.status().then((s) => setHint(s.hint)).catch(() => {});
+    api.app.platform().then((p) => setIsMac(p === "darwin")).catch(() => {});
+    // 原生打字模块只在 Windows 上有；不能用时这一节要显式解释"会退化成复制"
+    api.atype.available().then(setAtAvail).catch(() => setAtAvail(null));
     // 先拉一次当前快照, 之后靠主进程推 —— 只拉不推会漏掉"后台检查发现新版本"
     api.update.status().then(setUpd).catch(() => {});
     return api.update.onStatus(setUpd);
   }, []);
+
+  // 注册状态随「总开关 / 快捷键」变化。依赖里不放这两个值的话，
+  // 用户在别处改完快捷键再回到本页，看到的还是上次的注册结果。
+  useEffect(() => {
+    api.atype.hotkeyStatus().then(setAtHotkey).catch(() => setAtHotkey(null));
+  }, [settings.autotypeEnabled, settings.autotypeHotkey]);
 
   async function runUpdate(step: "check" | "download" | "install") {
     setUpdBusy(true);
@@ -300,6 +351,105 @@ export function SettingsPage(props: {
             onChange={(e) => onPatch({ genMinSymbols: Number(e.target.value) })}
           />
         </Row>
+      </section>
+
+      <section className="scard">
+        <h2>⌨ 快速填充</h2>
+        <p className="sec-hint">
+          按 <b>{hotkeyLabel(settings.autotypeHotkey, isMac ? "darwin" : "win32")}</b> 在任意窗口上方弹出条目面板，
+          选中后把用户名 / 密码当成<b>键盘输入</b>送进那个窗口 —— 不走剪贴板，也不依赖浏览器扩展。
+        </p>
+
+        <Row
+          title="启用快速填充"
+          desc="关闭后不再注册全局快捷键，面板也唤不出来（复制密码等功能不受影响）"
+        >
+          <Toggle
+            on={settings.autotypeEnabled}
+            onChange={(v) => onPatch({ autotypeEnabled: v })}
+          />
+        </Row>
+
+        <Row
+          title="默认填法"
+          desc={
+            settings.autotypeDefaultMode === "custom"
+              ? FILL_HINTS.custom
+              : `${FILL_HINTS[settings.autotypeDefaultMode]}（条目可以自定义模板覆盖这里）`
+          }
+        >
+          <select
+            className="sselect"
+            value={settings.autotypeDefaultMode}
+            onChange={(e) => onPatch({ autotypeDefaultMode: e.target.value as FillMode })}
+          >
+            {FILL_MODES.map((m) => (
+              <option key={m} value={m}>
+                {FILL_LABELS[m]}
+              </option>
+            ))}
+          </select>
+        </Row>
+
+        <Row
+          title="填完自动按回车提交"
+          desc={
+            settings.autotypeAutoSubmit
+              ? "⚠ 已打开：填完立刻替你回车。快速填充不知道目标窗口里是哪个网站，对着钓鱼页面按下回车就是把密码交出去"
+              : "关闭中（推荐）。填完停在输入框，你自己看一眼地址栏再按回车"
+          }
+        >
+          <Toggle
+            on={settings.autotypeAutoSubmit}
+            onChange={(v) => onPatch({ autotypeAutoSubmit: v })}
+          />
+        </Row>
+
+        <Row
+          title="逐字符间隔"
+          desc="0 = 一口气打完。有些网页要等接口返回才认得输入，卡住时可调到 30 ~ 60 毫秒"
+        >
+          <select
+            className="sselect"
+            value={settings.autotypeTypeDelayMs}
+            onChange={(e) => onPatch({ autotypeTypeDelayMs: Number(e.target.value) })}
+          >
+            {AUTOTYPE_DELAY_CHOICES.map((ms) => (
+              <option key={ms} value={ms}>
+                {ms === 0 ? "不间隔" : `每字符 ${ms} 毫秒`}
+              </option>
+            ))}
+          </select>
+        </Row>
+
+        <Row
+          title="面板里回显目标窗口标题"
+          desc="面板顶部显示「将填入：<窗口标题>」，用来确认没打错窗口。标题本身也可能带敏感信息，介意可关"
+        >
+          <Toggle
+            on={settings.autotypeShowTargetTitle}
+            onChange={(v) => onPatch({ autotypeShowTargetTitle: v })}
+          />
+        </Row>
+
+        <Row title="全局快捷键" desc="暂不支持在界面里改；冲突或被占用时会在下面说明原因" stack>
+          <div className="at-hotkey">
+            <code>{hotkeyLabel(settings.autotypeHotkey, isMac ? "darwin" : "win32")}</code>
+            <span className={hotkeyFlag(settings.autotypeEnabled, atHotkey, settings.autotypeHotkey, isMac).cls}>
+              {hotkeyFlag(settings.autotypeEnabled, atHotkey, settings.autotypeHotkey, isMac).text}
+            </span>
+          </div>
+        </Row>
+
+        <div className="sec-divider">
+          <b>{atAvail && !atAvail.ok ? "本机无法自动打字" : "自动打字是怎么干活的"}</b>
+          <span>
+            {atAvail && !atAvail.ok
+              ? `${atAvail.reason}。这种情况下填法会退化成「把密码复制到剪贴板」，由你手动粘贴。`
+              : "走 Unicode 通道逐字符发送，不受键盘布局与输入法影响，中文、符号、emoji 都能原样送到。" +
+                "但以管理员权限运行的窗口会拒收（Windows 的 UIPI 限制），这时不会硬塞，而是自动退化成「把密码复制到剪贴板」。"}
+          </span>
+        </div>
       </section>
 
       <section className="scard">

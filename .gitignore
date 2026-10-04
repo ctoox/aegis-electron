@@ -17,3 +17,9 @@ shots/
 # 之前在这里忽略过它：本地打包一切正常，CI 干净检出后文件消失，
 # electron-builder 不报错，只是静默换成默认 Electron 图标 —— 发出去的安装包带 Electron logo。
 # scripts/check-package-assets.ts 现在会专门检查它有没有进版本库。
+
+# node-gyp 的中间产物。native/autotype-win32/build/ 整个目录都是 node-gyp 生成的
+# （.vcxproj / .sln / config.gypi 每次编译都重写，提交它们只会制造无意义的冲突）。
+# ⚠ 作用域必须写成 native/*/build/ —— 写成全局 build/ 会把上面三行警告保护的
+#   build/icon.png 一起忽略掉，那正是这个项目踩过的坑。
+native/*/build/

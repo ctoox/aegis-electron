@@ -7,6 +7,7 @@ import type { Settings } from "../../core/prefs";
 import type { Snapshot } from "../../core/history";
 import type { BundleInfo, ShareBundle } from "../../core/share";
 import type { UpdateStatus } from "../../core/update";
+import type { ArmState, FillAction, FillItem, RunResult } from "../../core/autotype";
 
 export type {
   HealthReport,
@@ -18,6 +19,10 @@ export type {
   BundleInfo,
   ShareBundle,
   UpdateStatus,
+  ArmState,
+  FillAction,
+  FillItem,
+  RunResult,
 };
 
 export interface ImportCandidate extends ImportPreview {
@@ -51,6 +56,23 @@ export interface AppInfo {
   kdf: { algo: string; memoryKiB: number; iterations: number; parallelism: number };
   vaultPath: string;
   settingsPath: string;
+}
+
+/**
+ * 全局快捷键的注册结果。
+ * `registered` 为假时 `reason` 就是给人看的原因（"该快捷键已被其他程序占用" 之类），
+ * 除非是"功能被关掉所以没注册" —— 那种情况 reason 是空串，由界面自己渲染。
+ */
+export interface HotkeyStatus {
+  hotkey: string;
+  registered: boolean;
+  reason: string;
+}
+
+/** 原生打字模块能不能用（只有 Windows 有；没装 VC 运行库时也会是 false） */
+export interface NativeAvailability {
+  ok: boolean;
+  reason: string;
 }
 
 declare global {
@@ -159,6 +181,21 @@ declare global {
       };
       health: {
         report: (deep: boolean) => Promise<HealthReport>;
+      };
+      atype: {
+        available: () => Promise<NativeAvailability>;
+        /** 注意：返回的条目**不含 password 字段**（面板是"密码盲"的） */
+        entries: () => Promise<FillItem[]>;
+        preview: (id: string, action: FillAction) => Promise<{ text: string }>;
+        run: (id: string, action: FillAction) => Promise<RunResult>;
+        cancel: () => Promise<boolean>;
+        resize: (contentHeight: number) => Promise<boolean>;
+        armState: () => Promise<ArmState | null>;
+        /** 从界面里唤起填充面板；preselect 一般是当前条目标题 */
+        open: (preselect?: string) => Promise<boolean>;
+        hotkeyStatus: () => Promise<HotkeyStatus>;
+        onArm: (cb: (arm: ArmState) => void) => () => void;
+        onNotice: (cb: (msg: string) => void) => () => void;
       };
       portable: {
         formats: () => Promise<FormatInfo[]>;
