@@ -17,13 +17,18 @@ import { api, cleanError } from "./api";
 
 /** 改主密码 —— 还记得旧密码, 只想换一个。条目密文一条都不动。 */
 export function ChangePasswordModal(props: {
+  /**
+   * 当前的提示语。必须预填 —— 否则用户不重填时提交的是空串, 等于顺手把
+   * 原有提示抹掉, 而他以为只是"改个密码"。想改提示就在预填值上改。
+   */
+  currentHint: string;
   onClose: () => void;
   onDone: (msg: string) => void;
 }) {
   const [oldPw, setOldPw] = useState("");
   const [pw, setPw] = useState("");
   const [pw2, setPw2] = useState("");
-  const [hint, setHint] = useState("");
+  const [hint, setHint] = useState(props.currentHint);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -93,7 +98,7 @@ export function ChangePasswordModal(props: {
         </label>
 
         <label className="sec-field">
-          <span>新密码提示（可选，明文存在库文件头）</span>
+          <span>密码提示（可选，明文存在库文件头；留空则清除提示）</span>
           <input
             className="gate-input"
             type="text"
@@ -130,6 +135,8 @@ export function ChangePasswordModal(props: {
  *   3. 默认保留旧库备份 —— 万一想起旧密码还能回去。
  */
 export function ResetVaultModal(props: {
+  /** 当前提示语, 预填进输入框 —— 想沿用旧说法就不用重打, 想换直接改 */
+  currentHint: string;
   onClose: () => void;
   onDone: (msg: string) => void;
 }) {
@@ -137,7 +144,7 @@ export function ResetVaultModal(props: {
   const [word, setWord] = useState("");
   const [pw, setPw] = useState("");
   const [pw2, setPw2] = useState("");
-  const [hint, setHint] = useState("");
+  const [hint, setHint] = useState(props.currentHint);
   const [keepBackup, setKeepBackup] = useState(true);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);

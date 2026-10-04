@@ -119,6 +119,8 @@ export function SettingsPage(props: {
   const [exportFormat, setExportFormat] = useState<FormatId>("aegis-json");
   const [snaps, setSnaps] = useState<BackupSnapshot[]>([]);
   const [count, setCount] = useState(0);
+  /** 当前密码提示语 —— 供「修改主密码」弹窗预填, 避免用户在不知情下把提示清空 */
+  const [hint, setHint] = useState("");
   const [pwOpen, setPwOpen] = useState(false);
   const [clearOpen, setClearOpen] = useState(false);
   const [upd, setUpd] = useState<UpdateStatus | null>(null);
@@ -128,6 +130,7 @@ export function SettingsPage(props: {
     api.app.info().then(setInfo).catch(() => {});
     api.backup.list().then(setSnaps).catch(() => setSnaps([]));
     api.vault.list().then((l) => setCount(l.length)).catch(() => {});
+    api.vault.status().then((s) => setHint(s.hint)).catch(() => {});
     // 先拉一次当前快照, 之后靠主进程推 —— 只拉不推会漏掉"后台检查发现新版本"
     api.update.status().then(setUpd).catch(() => {});
     return api.update.onStatus(setUpd);
@@ -483,9 +486,12 @@ export function SettingsPage(props: {
 
       {pwOpen && (
         <ChangePasswordModal
+          currentHint={hint}
           onClose={() => setPwOpen(false)}
           onDone={(msg) => {
             setPwOpen(false);
+            // 提示可能刚被改过, 重读一次: 再开弹窗时预填的才是新值
+            api.vault.status().then((s) => setHint(s.hint)).catch(() => {});
             notify(msg, "ok");
           }}
         />

@@ -102,6 +102,7 @@ export function Gate(props: {
 
       {resetOpen && (
         <ResetVaultModal
+          currentHint={props.hint}
           onClose={() => setResetOpen(false)}
           onDone={(msg) => {
             setResetOpen(false);

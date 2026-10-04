@@ -207,7 +207,8 @@ export default function App() {
           setGate("ready");
           refresh();
         } else {
-          setHint(s.hint);
+          // hint 不在这里读 —— 交给下面那个「每次进解锁页就读一次」的 effect,
+          // 免得挂载和进站两处各读一遍、各留一份可能过期的副本
           setGate(s.exists ? "unlock" : "create");
         }
       })
@@ -217,6 +218,28 @@ export default function App() {
       .then((m) => setBackend(m))
       .catch((e) => setBackend(`后端未连通: ${e}`));
   }, []);
+
+  /**
+   * 每次「进入解锁页」都重读一次提示语。
+   *
+   * hint 明文存在库文件头里, 「改主密码 / 重置 / 新建库」都会把它换掉。
+   * 若只在挂载时读一次, 改完再锁库, 解锁页显示的还是启动那一刻的旧提示 ——
+   * 用户看到的就是"提示改不动"。挂在 gate 变成 unlock 这一刻, 就把所有
+   * 会锁库的路径(闲置超时 / 失焦 / 手动锁定 / 重置后回落)一次全覆盖了。
+   */
+  useEffect(() => {
+    if (gate !== "unlock") return;
+    let stale = false;
+    api.vault
+      .status()
+      .then((s) => {
+        if (!stale) setHint(s.hint);
+      })
+      .catch(() => {});
+    return () => {
+      stale = true;
+    };
+  }, [gate]);
 
   // ---- 活动心跳: 渲染层节流上报, 主进程据此做自动锁定倒计时 ----
   useEffect(() => {

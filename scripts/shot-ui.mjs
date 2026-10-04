@@ -411,6 +411,25 @@ async function main() {
     await sleep(500);
     await cdp.shot(path.join(OUT, "08-change-password.png"));
     check(await scrollAndProbe(cdp, "更换主密码"), "「更换主密码」滚到底后可达");
+
+    // 提示语不重填就会被清空 —— 弹窗必须预填当前值。
+    // 输入框顺序: 当前主密码 / 新主密码 / 再输一次 / 提示语, 所以取第 4 个。
+    const hp = JSON.parse(
+      String(
+        await cdp.js(`
+          // cdp.js 的外壳是同步 (() => {…})(), 顶层不能 await —— 用 async IIFE 包一层
+          return (async () => {
+            const st = await window.api.vault.status();
+            const f = [...document.querySelectorAll(".modal .gate-input")];
+            return JSON.stringify({ backend: st.hint, modal: f[3] ? f[3].value : null, n: f.length });
+          })();
+        `),
+      ),
+    );
+    console.log(`    · 后端 hint=「${hp.backend}」 弹窗预填=「${hp.modal}」(${hp.n} 个输入框)`);
+    check(String(hp.backend).length > 0, "演示库本身带提示语 (否则下面这条是空转)");
+    check(hp.modal === hp.backend, "改密码弹窗预填了当前提示语 (不重填也不会被默默清空)");
+
     await cdp.js(clickText("取消"));
     await sleep(300);
 
@@ -427,6 +446,56 @@ async function main() {
       const [name, ok] = part.split("=");
       check(ok === "true", `设置页 DOM 里出现 ${name}`);
     }
+
+    // ---- 9. 改提示 → 锁库 → 解锁页必须显示【新】提示 ----
+    //   这是本 bug 的正面复现。旧代码只在启动时读一次 hint, 所以"改提示 → 锁库"
+    //   之后解锁页显示的还是旧值, 用户看到的就是"提示改不动"。
+    //   这里只比对新旧不等的两个值才有意义(改完再锁库显示旧值 = 复现)。
+    //   核心拒绝新旧主密码同值, 所以必须连密码一起换 —— 跑完再把两者都还原,
+    //   保证脚本对着同一个演示目录可以反复跑。放最后: 一锁定就离开设置页。
+    console.log("\n改提示 → 锁库 → 解锁页显示的应是新提示");
+    const MARK = `巡检提示-${Date.now()}`;
+    const TMP_PW = "visual-check-123#tmp";
+    const sw = JSON.parse(
+      String(
+        await cdp.js(`
+          return (async () => {
+            const v = window.api.vault;
+            const orig = (await v.status()).hint;
+            await v.changePassword(${JSON.stringify(PASSWORD)}, ${JSON.stringify(TMP_PW)}, ${JSON.stringify(MARK)});
+            return JSON.stringify({ orig, after: (await v.status()).hint });
+          })();
+        `),
+      ),
+    );
+    console.log(`    · 后端提示: 「${sw.orig}」→「${sw.after}」`);
+    check(sw.after === MARK, "后端已写入新提示");
+
+    // 走界面上的锁定按钮 (或直接调 API 也会收到 vault:locked), 让 App 回到解锁页
+    const rLock = await cdp.js(clickText("锁定密码库", ".nav-item"));
+    check(rLock.startsWith("ok"), `点了「锁定密码库」(${rLock})`);
+    check(await waitFor(cdp, ".gate-card"), "已回到解锁页 (.gate-card)");
+    await sleep(600);
+
+    const shown = await cdp.js(`
+      const el = document.querySelector(".gate-hint");
+      return el ? el.textContent.trim() : "";
+    `);
+    console.log(`    · 解锁页显示: 「${shown}」  期望含: 「${MARK}」`);
+    check(String(shown).includes(MARK), "解锁页显示【新】提示 (不是启动时缓存/旧的那条)");
+    await cdp.shot(path.join(OUT, "09-unlock-hint.png"));
+
+    // 还原主密码与提示, 让演示目录可重复使用
+    const restored = await cdp.js(`
+      return (async () => {
+        const v = window.api.vault;
+        await v.unlock(${JSON.stringify(TMP_PW)});
+        await v.changePassword(${JSON.stringify(TMP_PW)}, ${JSON.stringify(PASSWORD)}, ${JSON.stringify(sw.orig)});
+        await v.lock();
+        return (await v.status()).hint;
+      })();
+    `);
+    check(String(restored) === sw.orig, `已还原主密码与提示 (hint=「${restored}」)`);
   } catch (e) {
     check(false, `流程中断: ${e.message}`);
     const out = logs.join("");
