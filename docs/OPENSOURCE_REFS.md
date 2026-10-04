@@ -64,7 +64,7 @@
 |---|---|---|---|
 | 1 | 自绘标题栏 + 窗口键 | ✅ 已有 | VS Code |
 | 2 | 三栏骨架（分组/列表/详情） | ✅ 已有 | Bitwarden 的比例（22/28/余量） |
-| 3 | 条目行（头像/副标题/徽章/红点） | ✅ 已有 | 1Password 式首字母头像 |
+| 3 | 条目行（头像/副标题/徽章/红点） | ✅ 已有 | 首字母头像（此类界面的通行做法） |
 | 4 | 字段卡（打码/眼睛/复制/生成） | ✅ 已有 | Bitwarden FieldView |
 | 5 | 主密码门（创建/解锁/错误态） | ✅ 已有 | - |
 | 6 | 参数化生成器弹窗 | ✅ 已有 | 对齐 Python 版 GeneratorDialog |
@@ -81,7 +81,7 @@
 
 ## 六、Tauri 迁移清单（将来换壳时照此执行）
 
-1. `npm create tauri-app` 或复用 `C:\dev\aegis2`，把本仓库 `src/renderer` + `src/core`（去掉 Node 依赖的部分）整体搬入前端；
+1. `npm create tauri-app` 或复用一个空白 Tauri 工程，把本仓库 `src/renderer` + `src/core`（去掉 Node 依赖的部分）整体搬入前端；
 2. `src/core/crypto.ts` → Rust：`argon2` + `aes-gcm` crate（参数保持一致：m=64MiB, t=3, p=4；AAD=`id|type`）；
 3. `src/core/vault.ts` → Rust：库文件 JSON 结构不变，直接读现有 `aegis.vault.json`；
 4. `api.ts` 一层替换（`window.api.x` → `invoke("x")`），其余前端代码不动；

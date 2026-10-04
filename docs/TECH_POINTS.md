@@ -1,6 +1,7 @@
-# 神盾 Aegis（Python 版）技术点与功能清单
+# 神盾 Aegis 技术点与功能清单
 
-> 供 aegis2（Tauri 2 + React + TS）对照复刻的需求基线。Python 版源码在 `C:\dev\aegis`。
+> 开发期的内部技术笔记：记录实现本项目时参照的功能基线与分层设计，保留原貌、未随发布版逐条同步。
+> 文中提到的「Python 版」「aegis2」是开发过程中用过的其他技术路线代称，其源码不在本仓库内。
 
 ## 1. 架构分层（最值得沿用的设计）
 
@@ -85,7 +86,7 @@
 ## 6. aegis2 技术选型理由（Tauri 2 + React + TS）
 
 - **体积/内存**：系统 WebView2，安装包 ~5MB（对比 Electron ~150MB）
-- **Rust 侧**：加密有成熟 crate（argon2/aes-gcm/rand），内存安全适合密码管理器；1Password 新版同思路（Rust 核心 + Web UI）
+- **Rust 侧**：加密有成熟 crate（argon2/aes-gcm/rand），内存安全适合密码管理器；「Rust 核心 + Web UI」已是这一类产品的通行架构
 - **React 生态**：表格/列表/动画/组件库（可配 Radix/shadcn、framer-motion）随便美化
 - **前端调后端**：`invoke("命令名")` ≈ Python 版直接调 `aegis_core`；Rust command 返回 `Result<T, String>`
 - 状态管理建议 Zustand；密码字段组件自研（打码/生成器/强度条）

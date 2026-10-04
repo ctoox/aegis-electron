@@ -1,11 +1,30 @@
 {
   "name": "aegis-electron",
   "version": "0.1.0",
-  "author": {
-    "name": "Aegis Team",
-    "email": "dev@aegis.local"
+  "description": "神盾 Aegis — 本地优先、零知识加密的开源密码管理器（桌面版）",
+  "license": "MIT",
+  "author": "神盾 Aegis 项目贡献者 (Aegis Project Contributors)",
+  "private": true,
+  "homepage": "https://github.com/OWNER/aegis-electron#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OWNER/aegis-electron.git"
   },
-  "description": "神盾 Aegis — Electron 版 (与 Tauri 版同 UI 对比选型)",
+  "bugs": {
+    "url": "https://github.com/OWNER/aegis-electron/issues"
+  },
+  "keywords": [
+    "password-manager",
+    "password-vault",
+    "argon2id",
+    "aes-256-gcm",
+    "totp",
+    "zero-knowledge",
+    "encryption",
+    "electron",
+    "offline",
+    "local-first"
+  ],
   "main": "out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
@@ -15,7 +34,7 @@
     "test": "tsx tests/vault.test.ts && tsx tests/vault-ops.test.ts && tsx tests/share.test.ts && tsx tests/totp.test.ts && tsx tests/health.test.ts && tsx tests/hibp.test.ts && tsx tests/portable.test.ts && tsx tests/settings.test.ts",
     "check:purity": "tsx scripts/check-renderer-purity.ts",
     "check:assets": "tsx scripts/check-package-assets.ts",
-    "check:share-interop": "echo \"需要一个可用的 Python 环境 (C:/dev/aegis, uv run python)。用法: cd C:/dev/aegis && uv run python C:/dev/aegis-electron/scripts/interop-share.py --gen\"",
+    "check:share-interop": "echo \"跨实现互通测试：需要另一实现（Python 版）的环境，该实现不在本仓库内。用法见 scripts/interop-share.py 文件头。\"",
     "smoke": "node scripts/smoke-electron.mjs",
     "shot:ui": "node scripts/shot-ui.mjs",
     "seed:visual": "tsx scripts/seed-visual-demo.ts",

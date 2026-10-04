@@ -1,5 +1,8 @@
 # Electron 版 vs Python 版：功能缺口核对
 
+> 开发期的内部核对笔记，保留原貌。文中「Python 版」是同一项目的另一实现（不在本仓库内）。
+> 本文记录的缺口**已于 2026-10-04 全部补齐**，结论段落反映的是当时的状态。
+
 > 起因：用户反馈「Electron 版本好像是有点问题，我好像不能重置密码库，和其他版本对比是缺了挺多功能的」。
 > 本文是对两版源码**逐模块核对**的结果，不是猜测。
 > 核对日期：2026-10-04　核对方式：全量 grep + 逐文件读实现。
@@ -12,7 +15,7 @@
 
 ## 二、逐项对比（含源码位置）
 
-| # | 功能 | Python 版（`C:\dev\aegis`） | Electron 版（`C:\dev\aegis-electron`） |
+| # | 功能 | Python 版（另一实现，不在本仓库） | Electron 版（本仓库） |
 |---|---|---|---|
 | 1 | 解锁 / 创建密码库 | ✅ `aegis_desktop/lock.py` | ✅ `src/renderer/src/Gate.tsx` |
 | 2 | 条目增删改 / 批量删除 | ✅ `window.py` + `entry_dialog.py` | ✅ `VaultStore` + `EntryModal.tsx` + `BulkDelete.tsx` |
@@ -149,9 +152,9 @@ Python 侧用 `QLocalServer` 或 `CreateMutexW`（命名互斥量，名字里带
 
 ## 八、README 表述需要修正
 
-`aegis-electron/README.md:3` 写着：
+`aegis-electron/README.md:3` 当时写着：
 
-> 与 Tauri 版（`C:\dev\aegis2`）**完全同 UI 同功能目标**，专供技术选型对比。
+> 与 Tauri 版（另一技术路线）**完全同 UI 同功能目标**，专供技术选型对比。
 
 「完全同功能目标」在缺失 9 项功能的情况下**不成立**，属误导。建议改成如实描述，例如：
 
