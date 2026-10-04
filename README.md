@@ -213,6 +213,27 @@ npm run dist:linux     # Linux
 > 缺了 electron-builder 不会报错，只会静默换成默认 Electron 图标。
 > `npm run check:assets` 会专门检查它。
 
+### 一个可选的前置：C++ 构建工具链（只影响 Windows）
+
+「快速填充」要往别的窗口发按键，这部分是一小块自己写的 N-API 原生模块
+（`native/autotype-win32/`，零第三方依赖）。它**只在 Windows 上编译**，且需要在
+Windows 上打包时存在 **MSVC**：
+
+```bash
+npm run build:native       # 单独编译它；改了 autotype.cc / binding.gyp 会自动重编
+```
+
+没装也不影响出包，`npm run dist:win` 会**拦住你并说清楚**，而不是让 electron-builder
+到最后一步报一句「找不到 `autotype_win32.node`」。两条路：
+
+| 选择 | 命令 | 结果 |
+|---|---|---|
+| 装工具链（推荐） | 装 [VS Build Tools 2022](https://visualstudio.microsoft.com/visual-cpp-build-tools/)，勾「使用 C++ 的桌面开发」 | 功能完整 |
+| 不装 | `npm run dist:win:optional` | 包照出，但「快速填充」退化成只能复制密码（面板里「填入」按钮不可用）|
+
+> macOS / Linux 上这一步会**静默跳过**（模块只有 Windows 用得上），
+> 所以那两边的打包命令不需要任何额外准备。
+
 ## 开发、测试与验证
 
 一条命令跑完所有本地检查（**与 CI 跑的是同一套**）：
@@ -222,13 +243,13 @@ npm run ci
 # = tsc --noEmit                      类型检查
 #   scripts/check-renderer-purity.ts   渲染层零 Node API（含传递依赖链）
 #   scripts/check-package-assets.ts    打包资源齐备且已进版本库
-#   npm test                           340 项断言
+#   npm test                           459 项断言
 ```
 
-测试覆盖 8 个套件：加密核心（31）· 库操作（36）· 分享包（42）· TOTP（17）·
-健康检查（29）· HIBP 客户端（17）· 导入导出（121）· 设置（47）。
+测试覆盖 9 个套件：加密核心（31）· 库操作（36）· 分享包（42）· TOTP（17）·
+健康检查（29）· HIBP 客户端（17）· 导入导出（121）· 设置（74）· 快速填充编译器（92）。
 
-`npm test` 碰不到"窗口能不能开起来"，所以另有两个走真实进程的脚本：
+`npm test` 碰不到"窗口能不能开起来"，所以另有一组走真实进程的脚本：
 
 ```bash
 npm run seed:visual -- "$TEMP/aegis-vis"   # 造一份内容可预期的演示库（主密码 visual-check-123）
@@ -236,10 +257,15 @@ npm run smoke                              # 启动冒烟 + 单实例保护实�
 npm run smoke -- --exe release/win-unpacked/AegisNext.exe   # 冒烟打包产物（推荐）
 npm run shot:ui -- --user-data-dir "$TEMP/aegis-vis" --password visual-check-123
                                            # 走 CDP 真实点击并截图，顺带断言弹窗按钮够不够得着
+node scripts/verify-autotype-native.mjs    # 真机验证自动打字：往记事本打一串中文/emoji 再读回比对
 ```
 
 `shot:ui` 通过 Chrome DevTools Protocol（`--remote-debugging-port`）驱动界面而不是抓窗口，
 所以能真正点击、能拿到精确像素，也不受窗口被遮挡或最小化影响。
+
+`verify-autotype-native.mjs` 是**唯一**需要真实桌面会话的脚本：它会开一个记事本、切到前台、
+把 `神盾Aegis·测试🚀✓—0O1l` 当作键盘输入发过去，再用 `WM_GETTEXT` 读回来逐字比对 ——
+中文、emoji 代理对、容易混的 `0O1l` 全在里面，专门验「Unicode 通道确实绕开了输入法与键盘布局」。
 
 演示数据：`npx tsx scripts/seed-health.ts`（主密码 `ctooctoo`，会灌入一批带健康问题的条目）。
 

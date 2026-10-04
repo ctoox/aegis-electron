@@ -10,7 +10,7 @@
  *   3. **缺 MSVC 要早点报清楚**。否则会在 electron-builder 的最后一步以
  *      "找不到 autotype_win32.node" 的形式爆出来，离真正的病根隔了十万八千里。
  *
- * 退出码：0 = 已构建 或 已是最新 或 本平台不需要；1 = 真的失败了
+ * 退出码：0 = 已构建 / 已是最新 / 本平台不需要 / 显式 --optional 跳过；1 = 真的失败了
  */
 import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
@@ -29,7 +29,15 @@ if (process.platform !== "win32") {
   process.exit(0);
 }
 
-// ---------- 2. 增量判断 ----------
+// ---------- 2. --optional：缺 MSVC 时的显式逃生口 ----------
+// 默认**硬失败**是刻意的：`dist:win` / `dist:all` 都串了这一步，硬失败才能挡住
+// "一个没有自动打字模块的 Windows 包被当成正式版发出去"。
+// 但新机器、纯前端开发机上没装 C++ 工具链是常态，所以留一个需要**明确写出**的口子：
+// --optional 等于用户签字确认"我知道这个包的快速填充会退化成只能复制密码"。
+const OPTIONAL =
+  process.argv.includes("--optional") || process.env.AEGIS_NATIVE_OPTIONAL === "1";
+
+// ---------- 3. 增量判断 ----------
 const SOURCES = ["autotype.cc", "binding.gyp"].map((f) => path.join(ADDON_DIR, f));
 
 if (fs.existsSync(OUT)) {
@@ -41,7 +49,7 @@ if (fs.existsSync(OUT)) {
   }
 }
 
-// ---------- 3. 找 MSVC，早点给人话 ----------
+// ---------- 4. 找 MSVC，早点给人话 ----------
 function hasMsvc() {
   const vswhere = path.join(
     process.env["ProgramFiles(x86)"] ?? "C:\\Program Files (x86)",
@@ -63,27 +71,44 @@ function hasMsvc() {
 }
 
 if (!hasMsvc()) {
+  if (OPTIONAL) {
+    // 两种结局都要说清：有现成的就用现成的，没有就真的少一个功能
+    console.warn(
+      [
+        "",
+        "[native] ⚠ 找不到 MSVC，已按 --optional 跳过编译。",
+        fs.existsSync(OUT)
+          ? `  沿用已有的预编译产物：${path.relative(root, OUT)}`
+          : "  这个包里不会有自动打字模块 —— 「快速填充」面板还在，但「填入」按钮不可用，只能复制密码。",
+        "  想启用完整功能：装 Visual Studio Build Tools 2022（勾「使用 C++ 的桌面开发」）后重跑 npm run build:native",
+        "",
+      ].join("\n"),
+    );
+    process.exit(0);
+  }
   console.error(
     [
       "",
       "[native] ✗ 找不到 MSVC（C++ 构建工具），无法编译快速填充模块。",
       "",
-      "  这是**可选功能**：不编译也能正常出包，只是「快速填充」里的",
-      "  「填入」按钮会不可用、只能复制密码。",
+      "  挡在这里、而不是让 electron-builder 到最后一步报「找不到 autotype_win32.node」，",
+      "  是因为后者离真正的病根太远。二选一：",
       "",
-      "  想启用请装其中一个（装完重开终端）：",
-      "    · Visual Studio Build Tools 2022（勾选「使用 C++ 的桌面开发」）",
-      "      https://visualstudio.microsoft.com/visual-cpp-build-tools/",
-      "    · 或完整版 Visual Studio 2022（同样勾选 C++ 桌面开发）",
+      "  A. 装 C++ 工具链（功能完整，推荐）",
+      "     Visual Studio Build Tools 2022，勾选「使用 C++ 的桌面开发」",
+      "     https://visualstudio.microsoft.com/visual-cpp-build-tools/",
+      "     装完重开终端，再跑：npm run build:native",
       "",
-      "  装好后重跑：npm run build:native",
+      "  B. 不装，接受少一个功能（「快速填充」退化成只能复制密码）",
+      "     npm run dist:win:optional           # 直接打包",
+      "     npm run build:native -- --optional  # 或只跑这一步",
       "",
     ].join("\n"),
   );
   process.exit(1);
 }
 
-// ---------- 4. 编译 ----------
+// ---------- 5. 编译 ----------
 log(`编译 ${path.relative(root, ADDON_DIR)} …`);
 const npx = process.platform === "win32" ? "npx.cmd" : "npx";
 const r = spawnSync(npx, ["--yes", "node-gyp", "rebuild"], {
