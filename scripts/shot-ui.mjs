@@ -231,6 +231,56 @@ async function scrollAndProbe(cdp, text) {
   return r === "ok";
 }
 
+/**
+ * 侧栏探针: 把视口压矮, 检查底部的健康卡还在不在可视区里。
+ *
+ * 背景: 侧栏有十几个导航项, 窗口一矮整列就会溢出色栏, 健康卡被挤出可视区 ——
+ * 而健康卡是"要么完整显示, 要么等于没有"的那类元素: 数字还在, 却没人看得见。
+ * 正确行为是导航区自己滚 (.nav-scroll), 健康卡钉在底部。
+ *
+ * 只改渲染视口, 不动真实窗口 —— 复现"窗口小"而不影响用户正在看的画面。
+ */
+async function sidebarProbe(cdp, out) {
+  await cdp.send("Emulation.setDeviceMetricsOverride", {
+    width: 900,
+    height: 520,
+    deviceScaleFactor: 1,
+    mobile: false,
+  });
+  await sleep(400);
+  await cdp.shot(path.join(out, "03b-sidebar-short.png"));
+
+  const raw = await cdp.js(`
+    const card = document.querySelector(".sidebar .health-card");
+    const nav = document.querySelector(".sidebar .nav-scroll");
+    if (!card || !nav) return "NOMARKUP";
+    const c = card.getBoundingClientRect();
+    return JSON.stringify({
+      top: Math.round(c.top),
+      bottom: Math.round(c.bottom),
+      vh: innerHeight,
+      overflowY: getComputedStyle(nav).overflowY,
+      canScroll: nav.scrollHeight > nav.clientHeight + 1,
+    });
+  `);
+
+  await cdp.send("Emulation.clearDeviceMetricsOverride");
+  await sleep(250);
+
+  if (raw === "NOMARKUP") {
+    console.log("    · 侧栏探针 → 没找到 .health-card / .nav-scroll");
+    return false;
+  }
+  const s = JSON.parse(raw);
+  console.log(
+    `    · 侧栏探针 → 健康卡 ${s.top}~${s.bottom} / 视口高 ${s.vh}` +
+      ` · nav-scroll overflow=${s.overflowY} 可滚=${s.canScroll}`,
+  );
+  const fullyVisible = s.top >= -1 && s.bottom <= s.vh + 1;
+  const scrolls = s.overflowY === "auto" && s.canScroll;
+  return fullyVisible && scrolls;
+}
+
 // ---------------------------------------------------------------- 主流程
 
 async function main() {
@@ -282,6 +332,13 @@ async function main() {
     check(gotMain, "主界面已渲染 (.nav-item)");
     await sleep(900);
     await cdp.shot(path.join(OUT, "03-vault.png"));
+
+    // ---- 3b. 矮窗口下侧栏会不会把健康卡挤出去 ----
+    console.log("\n侧栏布局（压矮视口）");
+    check(
+      await sidebarProbe(cdp, OUT),
+      "矮窗口下健康卡仍完整可见，导航区自己滚（不被挤出）",
+    );
 
     // ---- 4. 条目详情里的 🕘 / 📤 ----
     const entryRows = await cdp.js(`

@@ -570,68 +570,71 @@ export default function App() {
               </div>
             </div>
 
-            <button
-              className={`nav-item ${view === "vault" && cat === "all" ? "active" : ""}`}
-              onClick={() => { setView("vault"); setCat("all"); }}
-            >
-              <span>🗂</span> 全部条目 <span className="cnt">{entries.length}</span>
-            </button>
-            <button
-              className={`nav-item ${view === "vault" && cat === "fav" ? "active" : ""}`}
-              onClick={() => { setView("vault"); setCat("fav"); }}
-            >
-              <span>⭐</span> 收藏{" "}
-              <span className="cnt">{entries.filter((e) => e.favorite).length}</span>
-            </button>
-            <button
-              className={`nav-item ${view === "health" ? "active" : ""}`}
-              onClick={() => setView("health")}
-            >
-              <span>🩺</span> 密码健康 <span className="cnt">{problems}</span>
-            </button>
-            <button
-              className={`nav-item ${view === "settings" ? "active" : ""}`}
-              onClick={() => setView("settings")}
-            >
-              <span>⚙</span> 设置
-            </button>
+            {/* 导航区单独滚动 —— 否则选项一多或窗口一矮, 底部的健康卡会被挤出侧栏 */}
+            <div className="nav-scroll">
+              <button
+                className={`nav-item ${view === "vault" && cat === "all" ? "active" : ""}`}
+                onClick={() => { setView("vault"); setCat("all"); }}
+              >
+                <span>🗂</span> 全部条目 <span className="cnt">{entries.length}</span>
+              </button>
+              <button
+                className={`nav-item ${view === "vault" && cat === "fav" ? "active" : ""}`}
+                onClick={() => { setView("vault"); setCat("fav"); }}
+              >
+                <span>⭐</span> 收藏{" "}
+                <span className="cnt">{entries.filter((e) => e.favorite).length}</span>
+              </button>
+              <button
+                className={`nav-item ${view === "health" ? "active" : ""}`}
+                onClick={() => setView("health")}
+              >
+                <span>🩺</span> 密码健康 <span className="cnt">{problems}</span>
+              </button>
+              <button
+                className={`nav-item ${view === "settings" ? "active" : ""}`}
+                onClick={() => setView("settings")}
+              >
+                <span>⚙</span> 设置
+              </button>
 
-            <div className="nav-sep" />
+              <div className="nav-sep" />
 
-            <button className="nav-item" onClick={() => setModal({ kind: "entry", entry: null })}>
-              <span>➕</span> 新增条目
-            </button>
-            <button className="nav-item" onClick={doImport}>
-              <span>📥</span> 导入…
-            </button>
-            <button className="nav-item" onClick={doShareExport}>
-              <span>📤</span> 导出加密分享包
-            </button>
-            <button className="nav-item" onClick={doShareImport}>
-              <span>🔐</span> 导入分享包
-            </button>
-            <button
-              className="nav-item"
-              onClick={() => {
-                setView("vault");
-                setSelectMode(true);
-              }}
-            >
-              <span>☑</span> 多选 / 批量删除
-            </button>
-            <button className="nav-item" onClick={() => setCmdOpen(true)}>
-              <span>⌘</span> 命令面板 <span className="cnt">Ctrl K</span>
-            </button>
-            <button className="nav-item" onClick={cycleTheme}>
-              <span>{theme === "light" ? "☀" : theme === "dark" ? "☾" : "◐"}</span>
-              主题：{themeLabel}
-            </button>
-            <button className="nav-item" onClick={() => patchSettings({ glass: !glassOn })}>
-              <span>❖</span> 玻璃效果：{glassOn ? "开" : "关"}
-            </button>
-            <button className="nav-item" onClick={lockVault}>
-              <span>🔒</span> 锁定密码库
-            </button>
+              <button className="nav-item" onClick={() => setModal({ kind: "entry", entry: null })}>
+                <span>➕</span> 新增条目
+              </button>
+              <button className="nav-item" onClick={doImport}>
+                <span>📥</span> 导入…
+              </button>
+              <button className="nav-item" onClick={doShareExport}>
+                <span>📤</span> 导出加密分享包
+              </button>
+              <button className="nav-item" onClick={doShareImport}>
+                <span>🔐</span> 导入分享包
+              </button>
+              <button
+                className="nav-item"
+                onClick={() => {
+                  setView("vault");
+                  setSelectMode(true);
+                }}
+              >
+                <span>☑</span> 多选 / 批量删除
+              </button>
+              <button className="nav-item" onClick={() => setCmdOpen(true)}>
+                <span>⌘</span> 命令面板 <span className="cnt">Ctrl K</span>
+              </button>
+              <button className="nav-item" onClick={cycleTheme}>
+                <span>{theme === "light" ? "☀" : theme === "dark" ? "☾" : "◐"}</span>
+                主题：{themeLabel}
+              </button>
+              <button className="nav-item" onClick={() => patchSettings({ glass: !glassOn })}>
+                <span>❖</span> 玻璃效果：{glassOn ? "开" : "关"}
+              </button>
+              <button className="nav-item" onClick={lockVault}>
+                <span>🔒</span> 锁定密码库
+              </button>
+            </div>
 
             <button className="health-card" onClick={() => setView("health")}>
               <div className="health-num">{localHealth.score}</div>

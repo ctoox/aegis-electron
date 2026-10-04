@@ -65,6 +65,34 @@ button {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  /* grid 子项默认 min-height:auto —— 不写这行, 侧栏会被内容顶高而不是内部滚动 */
+  min-height: 0;
+}
+
+/*
+ * 侧栏分三段: 品牌(固定) + 导航(自己滚) + 健康卡/状态(固定)。
+ *
+ * 踩过的坑: 早先所有导航项都是 .sidebar 的直接子项, 没有滚动容器。选项一多或
+ * 窗口一矮, 总的行高超过侧栏高度 —— flex 项虽然默认可收缩, 但按钮的
+ * min-height 由内容撑住, 收不下去, 于是整列溢出侧栏, 底部的健康卡被挤出可视区。
+ * 健康卡这种东西"被挤掉一半"比不显示更糟: 数字还在, 却没人看得见。
+ *
+ * min-height: 0 是这里的关键, 少了它 .nav-scroll 一样不会收缩, 也就滚不起来。
+ */
+.sidebar > .brand,
+.sidebar > .health-card,
+.sidebar > .stack-chip {
+  flex: 0 0 auto;
+}
+
+.nav-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .brand {
