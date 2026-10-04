@@ -3,12 +3,30 @@ name: release
 # 出安装包 + 发 GitHub Release。
 #
 # 触发方式：
-#   1) 推 tag        git tag v0.1.0 && git push origin v0.1.0   → 三平台打包并直接发 Release
+#   1) 推 tag        git tag v0.1.0 && git push origin v0.1.0   → 全平台打包并直接发 Release
 #   2) 手动跑        Actions → release → Run workflow           → 只出包默认不发版
 #                    （勾上 publish 才会发 Release）
 #
-# 三平台必须各自原生跑：macOS 的 .dmg 只能在 macOS 上做，Linux 的 deb/AppImage 需要
-# 对应工具链（ubuntu-22.04 是 Debian 系兼容基线），Windows 的 NSIS 在 windows-latest 最稳。
+# ── 为什么没有 "uos" / "kylin" 这两个 job ─────────────────────────────
+# GitHub 只提供 ubuntu / windows / macOS 三类托管 runner，**没有 UOS、麒麟的镜像**，
+# 也不可能在 CI 里临时装一个。国产发行版不是"构建平台"，而是"目标平台" ——
+# 覆盖它们的正确做法是**选对包格式和构建基线**：
+#
+#   UOS V20 / 深度 V20   Debian 10 系 (glibc 2.28)  → 用 deb 或 AppImage
+#   银河麒麟 V10 桌面    Debian/Ubuntu 系           → 用 deb 或 AppImage
+#   中标麒麟 / 麒麟服务器 RHEL/CentOS 系             → 用 rpm
+#   谁都不确定 / 没有 root                          → 用 AppImage 或 tar.gz
+#
+# 兼容性靠什么保证：Electron 的预编译二进制**基于 Ubuntu 20.04 构建**，官方验证可在
+# Debian 10+ 上运行。本项目**没有任何原生模块**（build.npmRebuild=false），所以
+# 应用自身的代码不会引入比 Electron 更高的 glibc 要求 —— 在 ubuntu-22.04 上打出来的
+# 包，UOS V20 / Debian 10 上就是能跑。详见 docs/BUILD-PLATFORMS.md。
+#
+# ── 为什么 arm64 不跑 ARM runner ─────────────────────────────────────
+# electron-builder 打 deb/rpm 靠的是它自带的 **x86 版 FPM**；在 ARM 主机上会直接
+# "Exec format error"（除非装系统级 fpm 并设 USE_SYSTEM_FPM=true）。我们既然没有原生
+# 模块，不如统一在 x64 的 ubuntu-22.04 上**交叉打包** arm64 —— 更稳，也更省 runner。
+# ⚠ 将来若引入原生模块（node-gyp / .node），就必须改用 ubuntu-22.04-arm 并装系统 fpm。
 on:
   push:
     tags: ["v*"]
@@ -59,7 +77,9 @@ jobs:
           echo "package.json version = $V"
 
   # ────────────────────────────────────────────────────────────────
-  # 1. 三平台原生打包。打包前先过一遍质量门 —— 红着的代码不许出包。
+  # 1. 各平台原生打包。打包前先过一遍质量门 —— 红着的代码不许出包。
+  #    每个目标自带 expect(产物 glob) / meta(更新索引)，自检步骤据此断言，
+  #    省得在下面写一堆 case 分支。
   # ────────────────────────────────────────────────────────────────
   build:
     name: 打包 · ${{ matrix.label }}
@@ -70,14 +90,40 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            label: windows
+            label: windows-x64
             args: --win
-          - os: macos-14 # Apple Silicon runner，出 arm64 + x64 双架构 dmg
-            label: macos
+            expect: "release/*.exe"
+            meta: release/latest.yml
+
+          # Apple Silicon runner；dmg 目标在 package.json 里配了 arm64 + x64 双架构
+          - os: macos-14
+            label: macos-arm64-x64
             args: --mac
-          - os: ubuntu-22.04 # Debian 系基线 → deb / AppImage
-            label: linux
-            args: --linux
+            expect: "release/*.dmg"
+            meta: release/latest-mac.yml
+
+          # Linux x64 —— 桌面 Linux 与国产 x86_64 机器（UOS / 麒麟）的主力形态
+          - os: ubuntu-22.04
+            label: linux-x64
+            args: --linux --x64
+            expect: "release/*.deb release/*.rpm release/*.AppImage release/*.tar.gz"
+            meta: release/latest-linux.yml
+            linuxPackaging: true
+            debArch: amd64
+            rpmArch: x86_64
+
+          # Linux arm64 —— 飞腾 / 鲲鹏等国产 ARM 机器
+          # meta 故意留空：electron-updater 读的是唯一的 latest-linux.yml，里面若同时
+          # 有 x86_64 和 arm64 两个 AppImage，它**分不清架构、会下错包**。所以 arm64
+          # 只发安装包，不发更新索引（arm64 用户手动更新）。详见 docs/BUILD-PLATFORMS.md。
+          - os: ubuntu-22.04
+            label: linux-arm64
+            args: --linux --arm64
+            expect: "release/*.deb release/*.rpm release/*.AppImage release/*.tar.gz"
+            meta: ""
+            linuxPackaging: true
+            debArch: arm64
+            rpmArch: aarch64
     steps:
       - uses: actions/checkout@v4
 
@@ -95,8 +141,8 @@ jobs:
             ~/.cache/electron-builder
             ~/AppData/Local/electron/Cache
             ~/AppData/Local/electron-builder/Cache
-          key: electron-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
-          restore-keys: electron-${{ runner.os }}-
+          key: electron-${{ runner.os }}-${{ matrix.label }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: electron-${{ runner.os }}-${{ matrix.label }}-
 
       - run: npm ci
 
@@ -105,6 +151,16 @@ jobs:
 
       - name: 生产构建
         run: npm run build
+
+      # 打包 Linux 包需要的系统工具，缺一个都会在打包阶段才炸：
+      #   rpm             —— electron-builder 的 FPM 打 .rpm 时必须调 rpm/rpmbuild
+      #   libopenjp2-tools—— 提供 opj_compress，AppImage 生成图标时要用
+      - name: 安装 Linux 打包依赖
+        if: matrix.linuxPackaging
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends rpm libopenjp2-tools
 
       # 自动更新的"去哪查"是在**打包时**被写进 app-update.yml 的 (electron-updater
       # 运行时读它), 所以 owner/repo 必须在这一步之前就绪 —— 拖到发布环节再设没用。
@@ -137,29 +193,51 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          echo "---- release/ ----"
           ls -lh release/ || true
-          case "${{ matrix.label }}" in
-            windows) PAT="release/*.exe"; META="release/latest.yml" ;;
-            macos)   PAT="release/*.dmg"; META="release/latest-mac.yml" ;;
-            linux)   PAT="release/*.deb release/*.AppImage"; META="release/latest-linux.yml" ;;
-          esac
+
           ok=0
-          for f in $PAT; do
+          for f in ${{ matrix.expect }}; do
             if [ -f "$f" ]; then ok=$((ok+1)); echo "✔ $f  $(du -h "$f" | cut -f1)"; fi
           done
           if [ "$ok" -eq 0 ]; then
-            echo "::error::没找到任何安装包（期望 $PAT）"
+            echo "::error::没找到任何安装包（期望 ${{ matrix.expect }}）"
             exit 1
           fi
+
+          # 架构断言：--arm64 被忽略时 electron-builder 不会报错，只会安静地打出
+          # x64 包。交叉打包的场景下这必须由 CI 拦住，否则 arm64 用户拿到的是废包。
+          if [ -n "${{ matrix.debArch }}" ]; then
+            deb=$(ls release/*.deb 2>/dev/null | head -1)
+            case "$deb" in
+              *"_${{ matrix.debArch }}.deb") echo "✔ deb 架构 = ${{ matrix.debArch }}" ;;
+              *) echo "::error::deb 架构不对（期望 ${{ matrix.debArch }}）: $deb"; exit 1 ;;
+            esac
+            rm=$(ls release/*.rpm 2>/dev/null | head -1)
+            case "$rm" in
+              *".${{ matrix.rpmArch }}.rpm") echo "✔ rpm 架构 = ${{ matrix.rpmArch }}" ;;
+              *) echo "::error::rpm 架构不对（期望 ${{ matrix.rpmArch }}）: $rm"; exit 1 ;;
+            esac
+          fi
+
           # 更新元数据缺了不会导致打包失败，只会让客户端的自动更新**永远显示
           # "已是最新"**且不报任何错 —— 这种静默失败必须在 CI 阶段就拦住。
-          if [ ! -f "$META" ]; then
-            echo "::error::缺更新元数据 $META —— 客户端自动更新会永远显示「已是最新」。检查 build.publish 是否配好"
-            exit 1
-          fi
-          echo "✔ $META (自动更新索引)"
-          if ! ls release/*.blockmap >/dev/null 2>&1; then
-            echo "::warning::没有 .blockmap —— 更新会退化成全量下载（功能正常，只是更费流量）"
+          if [ -n "${{ matrix.meta }}" ]; then
+            if [ ! -f "${{ matrix.meta }}" ]; then
+              echo "::error::缺更新元数据 ${{ matrix.meta }} —— 客户端自动更新会永远显示「已是最新」。检查 build.publish 是否配好"
+              exit 1
+            fi
+            echo "✔ ${{ matrix.meta }} (自动更新索引)"
+            if ! ls release/*.blockmap >/dev/null 2>&1; then
+              echo "::warning::没有 .blockmap —— 更新会退化成全量下载（功能正常，只是更费流量）"
+            fi
+          else
+            # 该目标按设计不产出更新索引（当前只有 linux-arm64），确认它确实没留残留
+            if ls release/latest-linux.yml >/dev/null 2>&1; then
+              echo "::error::本目标不应产出 latest-linux.yml —— 两个架构同时存在会让 electron-updater 下错架构的包"
+              exit 1
+            fi
+            echo "（本目标按设计不产出自动更新索引）"
           fi
 
       - uses: actions/upload-artifact@v4
@@ -169,15 +247,17 @@ jobs:
             release/*.exe
             release/*.dmg
             release/*.deb
+            release/*.rpm
+            release/*.tar.gz
             release/*.AppImage
-            release/*.yml
+            release/latest*.yml
             release/*.blockmap
           if-no-files-found: error
           retention-days: 14
 
   # ────────────────────────────────────────────────────────────────
   # 2. 汇总产物 → 生成 SHA256 → 发 Release
-  #    三个平台全绿才发（needs.build.result 对矩阵是"全部成功")。
+  #    所有平台全绿才发（needs.build.result 对矩阵是"全部成功")。
   # ────────────────────────────────────────────────────────────────
   publish:
     name: 发布 Release

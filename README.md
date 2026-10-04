@@ -52,7 +52,7 @@
 | 不做的事 | 原因 |
 |---|---|
 | 云同步 / 多设备自动同步 | 需要服务端，与本项目"纯本地"的定位冲突 |
-| 浏览器扩展、iOS / Android 客户端 | 当前只做桌面端 |
+| 浏览器扩展、iOS / Android 客户端 | 当前只做桌面端。Android **不是"加个 CI job"能解决的** —— Electron 没有 Android 目标，需要重做移动端布局，并把加密核心从主进程搬到 WebView。方案评估见 [docs/BUILD-PLATFORMS.md](docs/BUILD-PLATFORMS.md) |
 | 团队共享、审计日志 | 面向个人使用 |
 | 找回主密码 | 零知识加密在数学上没有后门，忘了只能重置（会保留旧库备份） |
 | 静默自动更新 | 密码管理器不该在用户不知情时替换自己的可执行文件（详见[发布与自动更新](#发布与自动更新)） |
@@ -160,19 +160,32 @@
 
 从 [Releases](https://github.com/OWNER/aegis-electron/releases) 下载对应平台的安装包：
 
-| 平台 | 产物 | 说明 |
-|---|---|---|
-| Windows | `AegisNext-Setup-*.exe`（NSIS） | 支持自动更新 |
-| macOS | `AegisNext-*.dmg`（arm64 / x64） | 未签名的构建需要右键 → 打开；自动更新要求签名+公证 |
-| Linux | `*.deb` / `*.AppImage`（x64） | 基线 Ubuntu 22.04 |
+| 平台 | 架构 | 产物 | 说明 |
+|---|---|---|---|
+| Windows 10/11 | x64 | `AegisNext-Setup-*.exe`（NSIS） | 支持自动更新 |
+| macOS | arm64 / x64 | `*.dmg` | 未签名的构建需要右键 → 打开；**自动更新要求签名 + 公证** |
+| Linux / UOS / 深度 | x86_64 | `*.deb` · `*.rpm` · `*.AppImage` · `*.tar.gz` | 支持自动更新（仅 AppImage） |
+| Linux（飞腾 / 鲲鹏等国产 ARM） | arm64 | 同上 | **手动更新**（原因见下） |
+| 中标麒麟 / 麒麟服务器 | x86_64 | `*.rpm` | RHEL 系 |
 
-每个 Release 附带 `SHA256SUMS.txt`，下载后建议核对：
+**怎么挑**：国产系统上**优先用 `AppImage`** —— 单文件、免安装、不需要 root、不解析依赖，
+在 UOS / 麒麟上最不容易出问题。`deb` / `rpm` 有依赖声明，万一装不上（某个依赖包名对不上）
+就换 AppImage 或 `tar.gz`。每个 Release 都附带 `SHA256SUMS.txt`：
 
 ```bash
 sha256sum -c SHA256SUMS.txt        # Linux
 shasum -a 256 -c SHA256SUMS.txt    # macOS
 certutil -hashfile <文件> SHA256    # Windows
 ```
+
+> **这些包在 UOS / 麒麟上到底能不能跑**、为什么能跑、装不上怎么排查、
+> 以及龙芯（LoongArch）和 Android 的现状 —— 都写在
+> **[docs/BUILD-PLATFORMS.md](docs/BUILD-PLATFORMS.md)**。
+> 简言之：CI 只保证"包生出来了、架构对、更新索引在"，
+> **真正的兼容性必须在真机上验**（文档末尾有一份手工验证清单）。
+>
+> ⚠️ **arm64 Linux 不提供自动更新**：electron-updater 只读一个 `latest-linux.yml`，
+> 里面若同时有两个架构的 AppImage 它会下错包 —— 所以 x64 独占更新索引，arm64 手动更新。
 
 ## 从源码构建
 
@@ -247,7 +260,15 @@ docs/           设计说明、技术要点与调研笔记
 | 流水线 | 触发 | 做什么 |
 |---|---|---|
 | `ci.yml` | push / PR | ubuntu + windows 双平台跑质量门 → 生产构建 → 校验产物结构 |
-| `release.yml` | 推 `v*` tag 或手动 | 校验 tag 与 `package.json` 版本一致 → 解析更新源 → 三平台原生打包 → 产物自检 → 生成 `SHA256SUMS.txt` → 发 Release |
+| `release.yml` | 推 `v*` tag 或手动 | 校验 tag 与 `package.json` 版本一致 → 解析更新源 → **5 个目标原生打包** → 产物自检（含架构断言）→ 生成 `SHA256SUMS.txt` → 发 Release |
+
+发版产物覆盖 5 个目标：Windows x64、macOS arm64+x64、Linux x86_64、Linux arm64（同出
+deb/rpm/AppImage/tar.gz）。质量门 + 架构断言都在 CI 里硬拦 ——
+例如 `--arm64` 被 electron-builder 忽略时它**不会报错**，只会安静地打出 x64 包，
+所以自检会核对 deb 的 `Architecture` 与 rpm 的 arch 字段。
+
+平台适配（UOS / 麒麟怎么覆盖、包格式怎么挑、龙芯与 Android 的现状）见
+**[docs/BUILD-PLATFORMS.md](docs/BUILD-PLATFORMS.md)**。
 
 ```bash
 npm version patch        # 改版本号并打 tag（tag 形如 v0.1.1）
