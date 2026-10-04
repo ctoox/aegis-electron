@@ -1,6 +1,10 @@
 {
   "name": "aegis-electron",
   "version": "0.1.0",
+  "author": {
+    "name": "Aegis Team",
+    "email": "dev@aegis.local"
+  },
   "description": "神盾 Aegis — Electron 版 (与 Tauri 版同 UI 对比选型)",
   "main": "out/main/index.js",
   "scripts": {
@@ -8,7 +12,15 @@
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit",
-    "test": "tsx tests/vault.test.ts && tsx tests/totp.test.ts && tsx tests/health.test.ts && tsx tests/hibp.test.ts && tsx tests/portable.test.ts && tsx tests/settings.test.ts",
+    "test": "tsx tests/vault.test.ts && tsx tests/vault-ops.test.ts && tsx tests/share.test.ts && tsx tests/totp.test.ts && tsx tests/health.test.ts && tsx tests/hibp.test.ts && tsx tests/portable.test.ts && tsx tests/settings.test.ts",
+    "check:purity": "tsx scripts/check-renderer-purity.ts",
+    "check:assets": "tsx scripts/check-package-assets.ts",
+    "check:share-interop": "echo \"需要一个可用的 Python 环境 (C:/dev/aegis, uv run python)。用法: cd C:/dev/aegis && uv run python C:/dev/aegis-electron/scripts/interop-share.py --gen\"",
+    "smoke": "node scripts/smoke-electron.mjs",
+    "shot:ui": "node scripts/shot-ui.mjs",
+    "seed:visual": "tsx scripts/seed-visual-demo.ts",
+    "list:asar": "node scripts/list-asar.mjs",
+    "ci": "npm run typecheck && npm run check:purity && npm run check:assets && npm test",
     "dist:win": "electron-vite build && electron-builder --win",
     "dist:mac": "electron-vite build && electron-builder --mac",
     "dist:linux": "electron-vite build && electron-builder --linux",
@@ -19,7 +31,8 @@
     "productName": "AegisNext",
     "files": [
       "out/**/*",
-      "package.json"
+      "package.json",
+      "build/icon.png"
     ],
     "directories": {
       "output": "release",

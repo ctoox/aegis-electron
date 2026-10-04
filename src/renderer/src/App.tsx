@@ -4,13 +4,21 @@ import { analyzeLocal } from "../../core/health";
 import { FORMATS, type FormatId } from "../../core/formats";
 import { DEFAULT_SETTINGS, type Settings } from "../../core/prefs";
 import { api, cleanError, type ImportCandidate } from "./api";
+import type { ShareCandidate } from "./api";
+import { BulkDeleteModal } from "./BulkDelete";
 import { ColoredPassword } from "./ColoredPassword";
 import { CommandPalette } from "./CommandPalette";
 import { EntryModal } from "./EntryModal";
 import { Gate } from "./Gate";
 import { GeneratorModal } from "./GeneratorModal";
 import { HealthPage } from "./HealthPage";
+import { HistoryModal } from "./HistoryModal";
 import { ImportPreviewModal } from "./ImportExport";
+import {
+  ShareExportModal,
+  ShareImportModal,
+  pickShare,
+} from "./ShareModals";
 import { SettingsPage } from "./SettingsPage";
 import { Toasts, useToasts } from "./Toast";
 import { TotpCard } from "./TotpCard";
@@ -92,6 +100,17 @@ export default function App() {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [candidate, setCandidate] = useState<ImportCandidate | null>(null);
   const [busy, setBusy] = useState(false);
+  // ---- 分享包 / 条目历史 ----
+  /** 要分享的条目 id; null = 弹窗没开. 空数组 = 没勾选 → 默认整个库 */
+  const [shareIds, setShareIds] = useState<string[] | null>(null);
+  const [shareCand, setShareCand] = useState<ShareCandidate | null>(null);
+  const [histEntry, setHistEntry] = useState<EntryWithStrength | null>(null);
+  // ---- 列表多选 / 批量删除 ----
+  // selectMode 打开后点击行变成「勾选」; anchorId 记录上次点击的行, 供 Shift 区间选择
+  const [selectMode, setSelectMode] = useState(false);
+  const [selIds, setSelIds] = useState<Set<string>>(new Set());
+  const [anchorId, setAnchorId] = useState<string | null>(null);
+  const [bulkOpen, setBulkOpen] = useState(false);
   const { items: toasts, notify } = useToasts();
 
   // ---- 启动: 平台 / 材质 / 设置 ----
@@ -148,17 +167,28 @@ export default function App() {
     patchSettings({ theme: theme === "light" ? "dark" : theme === "dark" ? "system" : "light" });
   }
 
-  // 全局快捷键: Ctrl/Cmd+K 命令面板
+  // 全局快捷键: Ctrl/Cmd+K 命令面板, Ctrl/Cmd+M 多选模式(任何分类页都能进)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         if (gate === "ready") setCmdOpen((v) => !v);
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "m") {
+        e.preventDefault();
+        if (gate !== "ready") return;
+        setView("vault");
+        if (selectMode) {
+          setSelectMode(false);
+          setSelIds(new Set());
+          setAnchorId(null);
+        } else {
+          setSelectMode(true);
+        }
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [gate]);
+  }, [gate, selectMode]);
 
   async function refresh(keepSel?: string) {
     const list = await api.vault.list();
@@ -214,10 +244,16 @@ export default function App() {
       setCmdOpen(false);
       setModal(null);
       setCandidate(null);
+      setShareIds(null);
+      setShareCand(null);
+      setHistEntry(null);
       setView("vault");
       setGate("unlock");
+      exitSelect();
       if (reason === "idle") notify("闲置超时，密码库已自动锁定", "warn");
       else if (reason === "blur") notify("窗口失去焦点，密码库已锁定", "warn");
+      else if (reason === "restore")
+        notify("已从备份快照恢复，请用当时的密码解锁", "warn");
     });
   }, [notify]);
 
@@ -319,6 +355,27 @@ export default function App() {
     }
   }
 
+  // ---- 加密分享包 ----
+
+  /** 导出: 有勾选就只包勾选的, 没勾选就是全库 */
+  function doShareExport() {
+    if (entries.length === 0) {
+      notify("密码库是空的，没有可分享的条目", "warn");
+      return;
+    }
+    setShareIds([...selIds]);
+  }
+
+  async function doShareImport() {
+    setBusy(true);
+    try {
+      const c = await pickShare(notify);
+      if (c) setShareCand(c);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function onPaletteAction(id: string) {
     if (id === "new") setModal({ kind: "entry", entry: null });
     else if (id === "theme") cycleTheme();
@@ -326,6 +383,8 @@ export default function App() {
     else if (id === "settings") setView("settings");
     else if (id === "health") setView("health");
     else if (id === "import") doImport();
+    else if (id === "share-export") doShareExport();
+    else if (id === "share-import") doShareImport();
     else if (id === "generate") setModal({ kind: "gen" });
     else if (id === "generate-copy") {
       api.pw
@@ -360,6 +419,98 @@ export default function App() {
   const customFields = sel
     ? Object.entries(sel.extra ?? {}).filter(([k]) => k.startsWith("field:"))
     : [];
+
+  // ---- 列表多选 / 批量删除 ----
+  /** 退出选择模式并清空勾选 (锁库 / 切视图 / 删完 都走这里) */
+  function exitSelect() {
+    setSelectMode(false);
+    setSelIds(new Set());
+    setAnchorId(null);
+  }
+
+  /** 勾选 / 取消单条 */
+  function toggleSel(id: string) {
+    setSelIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+    setAnchorId(id);
+  }
+
+  /** Shift 点击: 从上次点击处到当前行整段选中 (与已有勾选合并) */
+  function selectRange(toId: string) {
+    const a = visible.findIndex((x) => x.id === anchorId);
+    const b = visible.findIndex((x) => x.id === toId);
+    if (a < 0 || b < 0) {
+      toggleSel(toId);
+      return;
+    }
+    const [lo, hi] = a < b ? [a, b] : [b, a];
+    setSelIds((prev) => {
+      const next = new Set(prev);
+      for (let i = lo; i <= hi; i++) next.add(visible[i].id);
+      return next;
+    });
+  }
+
+  // 选择模式快捷键: Esc 退出, Ctrl/Cmd+A 全选当前可见列表
+  useEffect(() => {
+    if (!selectMode) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setSelectMode(false);
+        setSelIds(new Set());
+        setAnchorId(null);
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
+        e.preventDefault();
+        setSelIds(new Set(visible.map((x) => x.id)));
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selectMode, visible]);
+
+  // 离开条目列表 (去健康页 / 设置页) 就退出选择模式, 免得切回来还停在勾选态
+  useEffect(() => {
+    if (view !== "vault") {
+      setSelectMode(false);
+      setSelIds(new Set());
+      setAnchorId(null);
+    }
+  }, [view]);
+
+  /** 待删除条目 —— 弹窗要逐条列出来给用户看, 所以取完整对象而非只有 id */
+  const bulkEntries = useMemo(
+    () => entries.filter((e) => selIds.has(e.id)),
+    [entries, selIds],
+  );
+
+  /** 当前可见列表是否已全部勾选 (决定全选框的三态显示) */
+  const allChecked = visible.length > 0 && visible.every((e) => selIds.has(e.id));
+
+  /** 全选框: 未全选 → 全选; 已全选 → 取消全选 */
+  function toggleAllVisible() {
+    setSelIds(allChecked ? new Set() : new Set(visible.map((x) => x.id)));
+  }
+
+  async function doBulkDelete() {
+    const ids = bulkEntries.map((e) => e.id);
+    if (ids.length === 0) return;
+    setBusy(true);
+    try {
+      const n = await api.vault.removeMany(ids);
+      setBulkOpen(false);
+      exitSelect();
+      await refresh();
+      notify(`已删除 ${n} 个条目`, "ok");
+    } catch (e) {
+      notify(cleanError(e), "err");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <div className="shell">
@@ -399,7 +550,12 @@ export default function App() {
       {gate === "loading" && <div className="empty"><div className="big">🛡️</div></div>}
 
       {(gate === "create" || gate === "unlock") && (
-        <Gate mode={gate} hint={hint} onDone={onGateDone} />
+        <Gate
+          mode={gate}
+          hint={hint}
+          onDone={onGateDone}
+          onReset={(msg) => notify(msg, "warn")}
+        />
       )}
 
       {gate === "ready" && (
@@ -447,6 +603,21 @@ export default function App() {
             </button>
             <button className="nav-item" onClick={doImport}>
               <span>📥</span> 导入…
+            </button>
+            <button className="nav-item" onClick={doShareExport}>
+              <span>📤</span> 导出加密分享包
+            </button>
+            <button className="nav-item" onClick={doShareImport}>
+              <span>🔐</span> 导入分享包
+            </button>
+            <button
+              className="nav-item"
+              onClick={() => {
+                setView("vault");
+                setSelectMode(true);
+              }}
+            >
+              <span>☑</span> 多选 / 批量删除
             </button>
             <button className="nav-item" onClick={() => setCmdOpen(true)}>
               <span>⌘</span> 命令面板 <span className="cnt">Ctrl K</span>
@@ -500,6 +671,11 @@ export default function App() {
               onImport={doImport}
               onExport={doExport}
               onBackup={doBackup}
+              onShareExport={doShareExport}
+              onShareImport={doShareImport}
+              onChanged={() => {
+                refresh().catch(() => {});
+              }}
             />
           )}
 
@@ -512,33 +688,97 @@ export default function App() {
                   <input placeholder="搜索条目" value={query}
                     onChange={(e) => setQuery(e.target.value)} />
                 </div>
-                <div className="list-meta">
-                  <span>{visible.length} 个条目</span>
-                  <span>按更新时间</span>
-                </div>
-                <div className="entry-list">
-                  {visible.map((e) => (
-                    <button key={e.id} className={`row ${sel?.id === e.id ? "active" : ""}`}
-                      onClick={() => { setSelId(e.id); setShowPw(false); }}>
-                      <div className="avatar" style={{ background: avatarColor(e) }}>
-                        {e.title.slice(0, 1) || "?"}
-                      </div>
-                      <div className="col">
-                        <div className="t">{e.title || "(无标题)"}</div>
-                        <div className="s">
-                          {e.extra?.group ? `📁 ${e.extra.group} · ` : ""}
-                          {e.username || e.url || "—"}
-                        </div>
-                      </div>
-                      <div className="flags">
-                        {e.extra?.totp && <span className="flag-2fa" title="已配置 TOTP">⏱</span>}
-                        {e.favorite && <span className="fav-star">★</span>}
-                        {(e.strength === "weak" || e.strength === "none") && (
-                          <span className="dot-weak" />
-                        )}
-                      </div>
+                {selectMode ? (
+                  /* 选择工具条: 全选复选框 + 已选计数 + 批量操作 */
+                  <div className="sel-toolbar">
+                    <button
+                      className={`sel-all ${allChecked ? "on" : ""}`}
+                      onClick={toggleAllVisible}
+                      title={allChecked ? "取消全选" : "全选当前列表"}
+                    >
+                      <span
+                        className={`tick ${allChecked ? "on" : selIds.size > 0 ? "part" : ""}`}
+                      >
+                        {allChecked ? "✓" : selIds.size > 0 ? "–" : ""}
+                      </span>
+                      全选
                     </button>
-                  ))}
+                    <span className="sel-count">
+                      已选 <b>{selIds.size}</b> / {visible.length}
+                    </span>
+                    <span className="grow" />
+                    <button
+                      className="cbtn danger"
+                      disabled={selIds.size === 0}
+                      onClick={() => setBulkOpen(true)}
+                    >
+                      🗑 删除{selIds.size > 0 ? ` ${selIds.size} 条` : ""}
+                    </button>
+                    <button className="cbtn" onClick={exitSelect}>
+                      完成
+                    </button>
+                  </div>
+                ) : (
+                  <div className="list-meta">
+                    <span>{visible.length} 个条目</span>
+                    <span className="meta-ops">
+                      {visible.length > 0 && (
+                        <button
+                          className="cbtn"
+                          onClick={() => setSelectMode(true)}
+                          title="多选（Ctrl+M）"
+                        >
+                          ☑ 多选
+                        </button>
+                      )}
+                      <span>按更新时间</span>
+                    </span>
+                  </div>
+                )}
+                <div className={`entry-list ${selectMode ? "selecting" : ""}`}>
+                  {visible.map((e) => {
+                    const checked = selIds.has(e.id);
+                    const active = !selectMode && sel?.id === e.id;
+                    return (
+                      <button
+                        key={e.id}
+                        className={`row ${active ? "active" : ""} ${checked ? "checked" : ""}`}
+                        onClick={(ev) => {
+                          if (!selectMode) {
+                            setSelId(e.id);
+                            setShowPw(false);
+                            return;
+                          }
+                          // Shift 划一段, 普通点击勾/取消一条
+                          if (ev.shiftKey) selectRange(e.id);
+                          else toggleSel(e.id);
+                        }}
+                      >
+                        {selectMode && (
+                          <span className={`row-check ${checked ? "on" : ""}`}>
+                            {checked ? "✓" : ""}
+                          </span>
+                        )}
+                        <div className="avatar" style={{ background: avatarColor(e) }}>
+                          {e.title.slice(0, 1) || "?"}
+                        </div>
+                        <div className="col">
+                          <div className="t">{e.title || "(无标题)"}</div>
+                          <div className="s">
+                            {e.extra?.group ? `📁 ${e.extra.group} · ` : ""}
+                            {e.username || e.url || "—"}
+                          </div>
+                        </div>
+                        <div className="flags">
+                          {e.extra?.totp && <span className="flag-2fa" title="已配置 TOTP">⏱</span>}
+                          {e.favorite && <span className="fav-star">★</span>}
+                          {(e.strength === "weak" || e.strength === "none") && (
+                            <span className="dot-weak" />
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
                   {visible.length === 0 && (
                     <div className="empty"><div className="big">🗂</div><div>没有条目</div></div>
                   )}
@@ -567,6 +807,10 @@ export default function App() {
                       <div className="head-actions">
                         <button className={`iconbtn ${sel.favorite ? "fav-on" : ""}`}
                           onClick={() => toggleFav(sel)} title="收藏">★</button>
+                        <button className="iconbtn" onClick={() => setHistEntry(sel)}
+                          title="历史版本">🕘</button>
+                        <button className="iconbtn" onClick={() => setShareIds([sel.id])}
+                          title="分享此条目">📤</button>
                         <button className="iconbtn" onClick={() => setModal({ kind: "entry", entry: sel })}
                           title="编辑">✎</button>
                         <button className="iconbtn" onClick={() => removeEntry(sel)} title="删除">🗑</button>
@@ -706,6 +950,15 @@ export default function App() {
           }}
         />
       )}
+      {bulkOpen && (
+        <BulkDeleteModal
+          entries={bulkEntries}
+          busy={busy}
+          notify={notify}
+          onClose={() => setBulkOpen(false)}
+          onConfirm={doBulkDelete}
+        />
+      )}
       {candidate && (
         <ImportPreviewModal
           candidate={candidate}
@@ -719,6 +972,50 @@ export default function App() {
               "ok",
             );
             setView("vault");
+          }}
+        />
+      )}
+
+      {shareIds !== null && (
+        <ShareExportModal
+          selected={entries.filter((e) => shareIds.includes(e.id))}
+          all={entries}
+          onClose={() => setShareIds(null)}
+          notify={notify}
+        />
+      )}
+
+      {shareCand && (
+        <ShareImportModal
+          candidate={shareCand}
+          notify={notify}
+          onClose={() => setShareCand(null)}
+          onDone={async (added, skipped, rekeyed) => {
+            setShareCand(null);
+            await refresh();
+            const extra = [
+              skipped > 0 ? `跳过损坏 ${skipped} 条` : "",
+              rekeyed > 0 ? `${rekeyed} 条重新分配了 ID` : "",
+            ]
+              .filter(Boolean)
+              .join("，");
+            notify(
+              `分享包导入完成：新增 ${added} 条${extra ? `（${extra}）` : ""}`,
+              "ok",
+            );
+            setView("vault");
+          }}
+        />
+      )}
+
+      {histEntry && (
+        <HistoryModal
+          entry={histEntry}
+          notify={notify}
+          onClose={() => setHistEntry(null)}
+          onRestored={async (updated) => {
+            await refresh(updated.id);
+            setHistEntry(null);
           }}
         />
       )}

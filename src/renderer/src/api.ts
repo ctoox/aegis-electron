@@ -4,13 +4,39 @@ import type { HealthReport } from "../../core/health";
 import type { FormatId, FormatInfo } from "../../core/formats";
 import type { ImportPreview } from "../../core/portable";
 import type { Settings } from "../../core/prefs";
+import type { Snapshot } from "../../core/history";
+import type { BundleInfo, ShareBundle } from "../../core/share";
 
-export type { HealthReport, FormatId, FormatInfo, ImportPreview, Settings };
+export type {
+  HealthReport,
+  FormatId,
+  FormatInfo,
+  ImportPreview,
+  Settings,
+  Snapshot,
+  BundleInfo,
+  ShareBundle,
+};
 
 export interface ImportCandidate extends ImportPreview {
   fileName: string;
   filePath: string;
   bytes: number;
+}
+
+export interface ShareCandidate {
+  info: BundleInfo;
+  fileName: string;
+  bytes: number;
+  /** 原始分享包 (原样回传给主进程解密, 渲染层看不到任何条目明文) */
+  doc: ShareBundle;
+}
+
+export interface BackupSnapshot {
+  path: string;
+  name: string;
+  bytes: number;
+  mtime: number;
 }
 
 export interface AppInfo {
@@ -43,7 +69,54 @@ declare global {
         add: (partial: Partial<Entry>) => Promise<Entry>;
         update: (id: string, patch: Partial<Entry>) => Promise<Entry>;
         remove: (id: string) => Promise<boolean>;
+        removeMany: (ids: string[]) => Promise<number>;
+        verify: (password: string) => Promise<boolean>;
         exportBackup: () => Promise<{ path: string; count: number } | null>;
+        /** 改主密码: 只重包 DEK, 条目密文一条不动 */
+        changePassword: (
+          oldPassword: string,
+          newPassword: string,
+          hint: string,
+        ) => Promise<VaultStatus>;
+        /** 重置: 忘记旧密码时的出路, 旧库留 .bak, 新库为空 */
+        reset: (
+          newPassword: string,
+          hint: string,
+          keepBackup: boolean,
+        ) => Promise<VaultStatus & { backupPath: string | null }>;
+        /** 清空全部条目 (需二次校验主密码); 返回清掉的条数 */
+        clearAll: (password: string) => Promise<number>;
+        history: (id: string) => Promise<Snapshot[]>;
+        restoreHistory: (id: string, index: number) => Promise<Entry>;
+      };
+      backup: {
+        list: () => Promise<BackupSnapshot[]>;
+        restore: (snapPath: string) => Promise<VaultStatus>;
+        openDir: () => Promise<void>;
+      };
+      share: {
+        export: (
+          ids: string[],
+          opts: {
+            password: string;
+            title?: string;
+            sender?: string;
+            note?: string;
+            hint?: string;
+          },
+        ) => Promise<{ path: string; count: number; fingerprint: string } | null>;
+        pickImport: () => Promise<ShareCandidate | null>;
+        commitImport: (
+          doc: unknown,
+          password: string,
+          opts: { forceNewIds?: boolean },
+        ) => Promise<{
+          added: number;
+          skipped: number;
+          rekeyed: number;
+          title: string;
+          sender: string;
+        }>;
       };
       pw: {
         generate: (opts: {

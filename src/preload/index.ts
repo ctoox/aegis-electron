@@ -19,7 +19,32 @@ const api = {
     update: (id: string, patch: Record<string, unknown>) =>
       ipcRenderer.invoke("vault:update", id, patch),
     remove: (id: string) => ipcRenderer.invoke("vault:remove", id),
+    removeMany: (ids: string[]) => ipcRenderer.invoke("vault:removeMany", ids),
+    verify: (password: string) => ipcRenderer.invoke("vault:verify", password),
     exportBackup: () => ipcRenderer.invoke("vault:exportBackup"),
+    changePassword: (oldPw: string, newPw: string, hint: string) =>
+      ipcRenderer.invoke("vault:changePassword", oldPw, newPw, hint),
+    reset: (newPw: string, hint: string, keepBackup: boolean) =>
+      ipcRenderer.invoke("vault:reset", newPw, hint, keepBackup),
+    clearAll: (password: string) => ipcRenderer.invoke("vault:clearAll", password),
+    history: (id: string) => ipcRenderer.invoke("vault:history", id),
+    restoreHistory: (id: string, index: number) =>
+      ipcRenderer.invoke("vault:restoreHistory", id, index),
+  },
+  backup: {
+    list: () => ipcRenderer.invoke("backup:list"),
+    restore: (snapPath: string) => ipcRenderer.invoke("backup:restore", snapPath),
+    openDir: () => ipcRenderer.invoke("backup:openDir"),
+  },
+  share: {
+    export: (ids: string[], opts: Record<string, unknown>) =>
+      ipcRenderer.invoke("share:export", ids, opts),
+    pickImport: () => ipcRenderer.invoke("share:pickImport"),
+    commitImport: (
+      doc: unknown,
+      password: string,
+      opts: { forceNewIds?: boolean },
+    ) => ipcRenderer.invoke("share:commitImport", doc, password, opts),
   },
   pw: {
     generate: (opts: Record<string, unknown>) =>

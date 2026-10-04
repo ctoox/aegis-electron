@@ -1,0 +1,202 @@
+name: release
+
+# 出安装包 + 发 GitHub Release。
+#
+# 触发方式：
+#   1) 推 tag        git tag v0.1.0 && git push origin v0.1.0   → 三平台打包并直接发 Release
+#   2) 手动跑        Actions → release → Run workflow           → 只出包默认不发版
+#                    （勾上 publish 才会发 Release）
+#
+# 三平台必须各自原生跑：macOS 的 .dmg 只能在 macOS 上做，Linux 的 deb/AppImage 需要
+# 对应工具链（ubuntu-22.04 是 Debian 系兼容基线），Windows 的 NSIS 在 windows-latest 最稳。
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 同时发布 GitHub Release（不勾则只产出 artifact）
+        type: boolean
+        default: false
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false # 发版不允许被新提交打断
+
+permissions:
+  contents: read
+
+jobs:
+  # ────────────────────────────────────────────────────────────────
+  # 0. 闸门：tag 和 package.json 的 version 必须一致
+  #    发出去的包文件名里带着版本号，两者不一致就会出现
+  #    "v0.1.2 的 Release 里躺着 AegisNext 0.1.1 的安装包" 这种事。
+  # ────────────────────────────────────────────────────────────────
+  guard:
+    name: 版本一致性
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      tag: ${{ steps.v.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: v
+        run: |
+          set -euo pipefail
+          V=$(node -p "require('./package.json').version")
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            TAG="${GITHUB_REF_NAME#v}"
+            if [ "$TAG" != "$V" ]; then
+              echo "::error::tag = ${GITHUB_REF_NAME}, 但 package.json version = ${V}；先跑 npm version ${TAG#v} 再打 tag"
+              exit 1
+            fi
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=v${V}" >> "$GITHUB_OUTPUT"
+          fi
+          echo "package.json version = $V"
+
+  # ────────────────────────────────────────────────────────────────
+  # 1. 三平台原生打包。打包前先过一遍质量门 —— 红着的代码不许出包。
+  # ────────────────────────────────────────────────────────────────
+  build:
+    name: 打包 · ${{ matrix.label }}
+    needs: guard
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            label: windows
+            args: --win
+          - os: macos-14 # Apple Silicon runner，出 arm64 + x64 双架构 dmg
+            label: macos
+            args: --mac
+          - os: ubuntu-22.04 # Debian 系基线 → deb / AppImage
+            label: linux
+            args: --linux
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # Electron 二进制 100+MB、electron-builder 的 nsis/winCodeSign 也是几十 MB，
+      # 不缓存的话每次发版都要重新下。key 跟着 lockfile 走。
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/electron-builder
+            ~/AppData/Local/electron/Cache
+            ~/AppData/Local/electron-builder/Cache
+          key: electron-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: electron-${{ runner.os }}-
+
+      - run: npm ci
+
+      - name: 质量门 (typecheck + 纯度 + 资源 + 测试)
+        run: npm run ci
+
+      - name: 生产构建
+        run: npm run build
+
+      - name: 打包
+        run: npx electron-builder ${{ matrix.args }} --publish never
+        env:
+          # macOS 签名 + 公证：仓库 Secrets 没配就自动跳过，产出未签名包
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # 没有证书时明确关掉"自动找钥匙串身份"，否则 macOS 上会去翻不存在的证书而失败
+          CSC_IDENTITY_AUTO_DISCOVERY: ${{ secrets.CSC_LINK == '' && 'false' || 'true' }}
+
+      # 产物自检：没出包就立刻红，别等 Release 页面空着才发现
+      - name: 产物自检
+        shell: bash
+        run: |
+          set -euo pipefail
+          ls -lh release/ || true
+          case "${{ matrix.label }}" in
+            windows) PAT="release/*.exe" ;;
+            macos)   PAT="release/*.dmg" ;;
+            linux)   PAT="release/*.deb release/*.AppImage" ;;
+          esac
+          ok=0
+          for f in $PAT; do
+            if [ -f "$f" ]; then ok=$((ok+1)); echo "✔ $f  $(du -h "$f" | cut -f1)"; fi
+          done
+          if [ "$ok" -eq 0 ]; then
+            echo "::error::没找到任何安装包（期望 $PAT）"
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aegis-${{ matrix.label }}
+          path: |
+            release/*.exe
+            release/*.dmg
+            release/*.deb
+            release/*.AppImage
+          if-no-files-found: error
+          retention-days: 14
+
+  # ────────────────────────────────────────────────────────────────
+  # 2. 汇总产物 → 生成 SHA256 → 发 Release
+  #    三个平台全绿才发（needs.build.result 对矩阵是"全部成功")。
+  # ────────────────────────────────────────────────────────────────
+  publish:
+    name: 发布 Release
+    needs: [guard, build]
+    if: needs.build.result == 'success' && (github.ref_type == 'tag' || inputs.publish)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # 发 Release / 建 tag 需要
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: 生成 SHA256 校验和
+        working-directory: dist
+        run: |
+          set -euo pipefail
+          ls -lh
+          sha256sum ./* > SHA256SUMS.txt
+          echo "---- SHA256SUMS.txt ----"
+          cat SHA256SUMS.txt
+
+      - name: 发 Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.guard.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG 已存在 → 覆盖上传产物"
+            gh release upload "$TAG" dist/* --clobber
+          else
+            gh release create "$TAG" dist/* \
+              --title "神盾 Aegis $TAG" \
+              --target "$GITHUB_SHA" \
+              --notes-file .github/release-notes.md \
+              --generate-notes
+          fi
+          {
+            echo "### Release $TAG 已发布"
+            echo ""
+            echo "https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
+          } >> "$GITHUB_STEP_SUMMARY"

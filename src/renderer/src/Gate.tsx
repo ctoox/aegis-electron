@@ -1,17 +1,21 @@
 import { useState } from "react";
 import { api, cleanError } from "./api";
+import { ResetVaultModal } from "./Security";
 
 /** 主密码门: 无库 → 创建 (双输入+提示语); 有库 → 解锁. */
 export function Gate(props: {
   mode: "create" | "unlock";
   hint: string;
   onDone: () => void;
+  /** 重置成功后把结果告诉用户 (走 toast, 因为界面马上就切走了) */
+  onReset?: (msg: string) => void;
 }) {
   const [pw, setPw] = useState("");
   const [pw2, setPw2] = useState("");
   const [hint, setHint] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  const [resetOpen, setResetOpen] = useState(false);
   const isCreate = props.mode === "create";
 
   async function submit() {
@@ -84,7 +88,29 @@ export function Gate(props: {
         <button className="gate-btn" type="submit" disabled={busy}>
           {busy ? "Argon2id 计算中…" : isCreate ? "创建并进入" : "解锁"}
         </button>
+
+        {!isCreate && (
+          <button
+            className="gate-forgot"
+            type="button"
+            onClick={() => setResetOpen(true)}
+          >
+            忘记主密码？
+          </button>
+        )}
       </form>
+
+      {resetOpen && (
+        <ResetVaultModal
+          onClose={() => setResetOpen(false)}
+          onDone={(msg) => {
+            setResetOpen(false);
+            props.onReset?.(msg);
+            // 重置后主进程里已经是一个解锁态的空库, 直接进主界面
+            props.onDone();
+          }}
+        />
+      )}
     </div>
   );
 }

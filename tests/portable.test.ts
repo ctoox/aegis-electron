@@ -3,6 +3,8 @@
  */
 import { newEntry } from "../src/core/vault";
 import type { Entry } from "../src/core/types";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   FORMATS,
   buildExport,
@@ -151,8 +153,15 @@ async function main() {
     ],
   });
   const bwj = parseImport(bwJson);
-  ok(bwj.entries.length === 2, "只导入 login + note, 跳过 card/identity");
-  ok(bwj.warnings.some((w) => w.includes("银行卡")), "跳过项在 warnings 里说明");
+  ok(bwj.entries.length === 4, "login/note/card/identity 四类全部导入 (不再丢弃 3/4)");
+  ok(byTitle(bwj.entries, "一张卡").type === "bank", "Bitwarden type=3 → bank 类型");
+  ok(byTitle(bwj.entries, "身份").type === "id", "Bitwarden type=4 → id 类型");
+  // 真正未知的类型才跳过, 且必须在 warnings 里说明
+  const bwUnknown = parseImport(
+    JSON.stringify({ encrypted: false, folders: [], items: [{ id: "x", type: 9, name: "怪东西" }] }),
+  );
+  ok(bwUnknown.entries.length === 0, "未知 type 仍然跳过");
+  ok(bwUnknown.warnings.some((w) => w.includes("类型 9")), "未知类型在 warnings 里说明");
   const bank = byTitle(bwj.entries, "银行");
   ok(bank.extra.group === "家庭", "folderId → folders 名称");
   ok(bank.extra["field:卡号"] === "6222***", "自定义字段");
@@ -233,6 +242,66 @@ async function main() {
   const bwcsv = buildExport(src, "bitwarden-csv").content;
   ok(bwcsv.startsWith("folder,favorite,type,name,notes,fields,reprompt,login_uri,login_username,login_password,login_totp"), "Bitwarden CSV 表头与官方一致");
   ok(bwcsv.includes(",note,") && bwcsv.includes(",login,"), "type 只用 login/note");
+
+  // ====== 类型往返: plain-csv 的 Type 列写的是原始字面量, 导入端必须认得 ======
+  // (曾经的 bug: mapType 只认 identity/4, 自家导出的 bank/id 会被悄悄吃成 login)
+  const typed: Entry[] = [
+    newEntry({ type: "login", title: "类型-登录" }),
+    newEntry({ type: "note", title: "类型-笔记" }),
+    newEntry({ type: "bank", title: "类型-银行卡" }),
+    newEntry({ type: "id", title: "类型-证件" }),
+  ];
+  const expectTitle: Record<string, string> = {
+    login: "类型-登录",
+    note: "类型-笔记",
+    bank: "类型-银行卡",
+    id: "类型-证件",
+  };
+  const typedBack = parseImport(buildExport(typed, "plain-csv").content);
+  for (const t of ["login", "note", "bank", "id"] as const) {
+    ok(byTitle(typedBack.entries, expectTitle[t]).type === t, `plain-csv: type=${t} 往返一致`);
+  }
+  // Bitwarden JSON 用数字表达类型 (1=login 2=note 3=card 4=identity)
+  const bwJsonTyped = parseImport(buildExport(typed, "bitwarden-json").content);
+  ok(byTitle(bwJsonTyped.entries, "类型-银行卡").type === "bank", "bitwarden-json: 数字 3 → bank");
+  ok(byTitle(bwJsonTyped.entries, "类型-证件").type === "id", "bitwarden-json: 数字 4 → id");
+
+  // ================= 固定样例文件回归 (testdata/test-bulk.csv) =================
+  // 80 条批量删除测试数据: 手写 CSV 解析器 + 分组/类型映射的端到端回归.
+  // 数据被改坏时应该在这里炸掉, 而不是等到用户在 UI 里点「全选 → 删除」才发现.
+  {
+    const bulkText = readFileSync(join(__dirname, "..", "testdata", "test-bulk.csv"), "utf8");
+    ok(detectFormat(bulkText) === "plain-csv", "test-bulk.csv 识别为 plain-csv");
+    const bulk = parseImport(bulkText, "plain-csv");
+    ok(bulk.entries.length === 80, `test-bulk.csv 解析出 80 条 (实际 ${bulk.entries.length})`);
+    ok(bulk.groups.length === 5, `test-bulk.csv 5 个分组 (实际 ${bulk.groups.length})`);
+
+    const gcount = new Map<string, number>();
+    const tcount = new Map<string, number>();
+    let noPw = 0, http = 0, totp = 0, fav = 0;
+    for (const e of bulk.entries) {
+      const g = e.extra?.group ?? "";
+      gcount.set(g, (gcount.get(g) ?? 0) + 1);
+      tcount.set(e.type, (tcount.get(e.type) ?? 0) + 1);
+      if (!e.password) noPw++;
+      if (/^http:\/\//i.test(e.url ?? "")) http++;
+      if (e.extra?.totp) totp++;
+      if (e.favorite) fav++;
+    }
+    ok(gcount.get("批量测试A") === 20 && gcount.get("批量测试B") === 20 && gcount.get("批量测试C") === 20,
+      "test-bulk.csv A/B/C 各 20 条 (每 10 条一分组、轮转 5 个组)");
+    ok(gcount.get("批量测试D") === 10 && gcount.get("批量测试E") === 10, "test-bulk.csv D/E 各 10 条");
+    ok(tcount.get("login") === 66 && tcount.get("note") === 8 && tcount.get("bank") === 3 && tcount.get("id") === 3,
+      `test-bulk.csv 类型分布 login=66/note=8/bank=3/id=3 (实际 ${[...tcount].map(([k, v]) => k + "=" + v).join("/")})`);
+    ok(noPw === 8 && http === 10 && totp === 8 && fav === 10,
+      `test-bulk.csv 特征计数 无密码 8 / HTTP 10 / TOTP 8 / 收藏 10 (实际 ${noPw}/${http}/${totp}/${fav})`);
+    ok(bulk.entries[0].title === "测试条目 001" && bulk.entries[79].title === "测试条目 080",
+      "test-bulk.csv 标题带序号, 首尾对得上 (方便核对 Shift 区间选中)");
+    // 弱密码复用: 每 4 条一次, 至少要有若干条重复, 否则「重复密码」检测测不出来
+    const pwUse = new Map<string, number>();
+    for (const e of bulk.entries) if (e.password) pwUse.set(e.password, (pwUse.get(e.password) ?? 0) + 1);
+    ok([...pwUse.values()].filter((n) => n > 1).length >= 4, "test-bulk.csv 存在多组重复弱密码 (可触发重复密码检测)");
+  }
 
   // ================= 其它小工具 =================
   ok(normalizeTotp("otpauth://totp/A?secret=abcd&issuer=x") === "ABCD", "otpauth → 大写 secret");

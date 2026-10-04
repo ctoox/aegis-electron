@@ -38,6 +38,8 @@ export interface Settings {
   theme: Theme;
   /** 液态玻璃效果开关 */
   glass: boolean;
+  /** 关闭窗口时最小化到托盘（而不是退出应用） */
+  closeToTray: boolean;
 }
 
 export const AUTO_LOCK_CHOICES = [0, 1, 5, 15, 30, 60] as const;
@@ -59,6 +61,7 @@ export const DEFAULT_SETTINGS: Settings = {
   genMinSymbols: 1,
   theme: "system",
   glass: true,
+  closeToTray: false,
 };
 
 export const SETTINGS_FILENAME = "aegis.settings.json";
@@ -108,5 +111,6 @@ export function normalizeSettings(raw: unknown): Settings {
     genMinSymbols: intOr(o.genMinSymbols, DEFAULT_SETTINGS.genMinSymbols, 0, 16),
     theme: theme === "light" || theme === "dark" || theme === "system" ? theme : DEFAULT_SETTINGS.theme,
     glass: boolOr(o.glass, DEFAULT_SETTINGS.glass),
+    closeToTray: boolOr(o.closeToTray, DEFAULT_SETTINGS.closeToTray),
   };
 }

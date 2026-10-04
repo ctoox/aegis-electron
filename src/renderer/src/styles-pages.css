@@ -775,3 +775,560 @@ input[type="range"] {
 :root[data-glass="on"] .ftab.active {
   background: var(--g-active);
 }
+
+/* ==========================================================================
+   列表多选 / 批量删除
+   ========================================================================== */
+
+/* 列表头右侧的小操作 (多选 / 全选 / 清空 / 完成) */
+.meta-ops {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* 勾选圈: 选择模式下顶在头像左侧 */
+.row-check {
+  width: 17px;
+  height: 17px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 1.5px solid var(--text-3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.row-check.on {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+/* 勾选行淡底; 选择模式下不显示"详情选中"态, 免两种高亮打架 */
+.row.checked {
+  background: var(--accent-soft);
+}
+
+.entry-list.selecting .row.active {
+  background: transparent;
+}
+
+/* 选择工具条: 顶在列表上方, 把「全选 / 计数 / 批量操作」收进一条 */
+.sel-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  row-gap: 6px;
+  /* 列表栏窄(窗口小/侧栏+详情占位多)时宁可换行, 也绝不让删除按钮被挤出去 */
+  flex-wrap: wrap;
+  margin: 0 4px 8px;
+  padding: 7px 10px;
+  border-radius: var(--r-lg);
+  background: var(--accent-soft);
+  border: 1px solid var(--border);
+  animation: sel-in 0.16s ease-out;
+}
+
+/* 这几个都不可压缩; 占位用的 .grow 先收缩 */
+.sel-all,
+.sel-count,
+.sel-toolbar .cbtn {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.sel-toolbar .grow {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+@keyframes sel-in {
+  from {
+    transform: translateY(-4px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+/* 全选框: 复选框 + 文字, 三态 (空 / 部分选中 / 全选) */
+.sel-all {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 8px 3px 4px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-2);
+  transition: color 0.12s;
+}
+
+.sel-all:hover {
+  color: var(--text);
+}
+
+.sel-all .tick {
+  width: 17px;
+  height: 17px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 1.5px solid var(--text-3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.sel-all .tick.part {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.sel-all .tick.on {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.sel-count {
+  font-size: 11px;
+  color: var(--text-2);
+}
+
+.sel-count b {
+  font-size: 12px;
+  color: var(--accent);
+}
+
+.sel-toolbar .cbtn {
+  background: var(--surface);
+}
+
+/* 危险按钮: 批量操作条与确认弹窗共用 */
+.cbtn.danger,
+.modal-btns button.danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+  font-weight: 600;
+}
+
+.cbtn.danger:hover:not(:disabled),
+.modal-btns button.danger:hover:not(:disabled) {
+  filter: brightness(1.08);
+  border-color: var(--danger);
+}
+
+.cbtn.danger:disabled,
+.modal-btns button.danger:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* 删除确认弹窗: 把"到底删哪些"摊开给用户看 */
+.del-warn {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-2);
+  background: var(--field);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 10px 12px;
+}
+
+.del-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--field);
+}
+
+.del-list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 12px;
+  font-size: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.del-list li:last-child {
+  border-bottom: none;
+}
+
+.del-list li .t {
+  font-weight: 600;
+  color: var(--text);
+  max-width: 56%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.del-list li .s {
+  font-size: 11px;
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.del-more {
+  align-self: flex-start;
+  cursor: pointer;
+}
+
+/* 确认输入区: 手打「删除」或输入主密码, 二选一 */
+.del-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.del-confirm-lbl {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.del-confirm input {
+  width: 100%;
+}
+
+.del-hint {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text-3);
+}
+
+.del-hint b {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* 玻璃模式下这几块面板也跟着走.
+   ⚠ 注意: 千万不要把 .sel-toolbar 里的按钮一起玻璃化 —— 那条规则的特异性
+   高于 .cbtn.danger, 会把危险按钮的红色背景盖成 rgba(255,255,255,.72),
+   配上 .cbtn.danger 的白色文字就是「白字白底」, 整个按钮直接隐身. */
+:root[data-glass="on"] .sel-toolbar,
+:root[data-glass="on"] .del-list,
+:root[data-glass="on"] .del-warn {
+  background: var(--g-hi);
+  border-color: var(--g-line);
+}
+
+/* 玻璃工具条上的按钮保持实色, 才有"浮起来"的层次与可见的边界 */
+:root[data-glass="on"] .sel-toolbar .cbtn:not(.danger) {
+  background: var(--surface);
+  border-color: var(--border);
+}
+
+/* ============ 主密码级操作弹窗 (Security.tsx) ============ */
+.sec-note {
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--text-2);
+  background: var(--field);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 10px 12px;
+}
+
+/* 重置密码库的红色警告: 必须比普通说明更"重", 因为它要阻止一次不可逆操作 */
+.sec-danger {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--text-2);
+  background: color-mix(in srgb, var(--danger) 8%, var(--field));
+  border: 1px solid color-mix(in srgb, var(--danger) 34%, var(--border));
+  border-left-width: 3px;
+  border-radius: var(--r-md);
+  padding: 10px 12px;
+}
+
+.sec-danger b {
+  color: var(--danger);
+  font-size: 12.5px;
+}
+
+.sec-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.sec-field > span {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.sec-field input {
+  width: 100%;
+}
+
+.sec-2col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.sec-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.sec-err {
+  font-size: 12px;
+  color: var(--danger);
+}
+
+/* 设置页里的分节小标题 (与 .srow 同级使用) */
+.sec-divider {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-3);
+}
+
+.sec-divider b {
+  font-size: 13px;
+  color: var(--text);
+}
+
+.sec-divider.danger b {
+  color: var(--danger);
+}
+
+.srow-ctl .btn-danger {
+  padding: 8px 16px;
+  border-radius: var(--r-md);
+  font-size: 13px;
+  font-weight: 600;
+  background: var(--danger);
+  color: #fff;
+}
+
+.srow-ctl .btn-danger:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* 库文件快照列表 */
+.snap-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--field);
+}
+
+.snap-list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 12px;
+  font-size: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.snap-list li:last-child {
+  border-bottom: none;
+}
+
+.snap-name {
+  flex: 1;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 11.5px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.snap-meta {
+  font-size: 11px;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.snap-act {
+  padding: 3px 10px;
+  border-radius: var(--r-md);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--accent);
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.snap-act:hover {
+  border-color: var(--accent);
+}
+
+/* ============ 条目历史版本 (HistoryModal.tsx) ============ */
+.hist-note,
+.hist-empty {
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--text-2);
+}
+
+.hist-note .link {
+  margin-left: 10px;
+  cursor: pointer;
+  color: var(--accent);
+}
+
+.hist-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 52vh;
+  overflow-y: auto;
+}
+
+.hist-item {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--field);
+  padding: 9px 12px;
+}
+
+.hist-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.hist-time {
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 11.5px;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.hist-diff {
+  flex: 1;
+  font-size: 11.5px;
+  color: var(--warn);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hist-diff.same {
+  color: var(--text-3);
+}
+
+.hist-restore {
+  padding: 3px 10px;
+  border-radius: var(--r-md);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--accent);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  white-space: nowrap;
+}
+
+.hist-restore:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.hist-restore:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.hist-fields {
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.hist-fields > div {
+  display: flex;
+  gap: 8px;
+  font-size: 11.5px;
+}
+
+.hist-fields dt {
+  width: 48px;
+  flex: none;
+  color: var(--text-3);
+}
+
+.hist-fields dd {
+  margin: 0;
+  flex: 1;
+  color: var(--text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ============ 分享包导出范围选择 ============ */
+.share-scope {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.share-scope label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+/* 解锁页底部的「忘记主密码」—— 是出路, 但不能看着像主操作 */
+.gate-forgot {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-3);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.gate-forgot:hover {
+  color: var(--danger);
+}

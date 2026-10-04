@@ -101,6 +101,42 @@ async function main() {
   const s4 = await VaultStore.open(vp, "master-pw-123");
   ok(s4.list().length === 1, "删除已落盘");
 
+  // --- 批量删除 (列表多选 / 健康页一键清理 走这条路径) ---
+  s4.add({ title: "批量A", password: "x" });
+  s4.add({ title: "批量B", password: "y" });
+  s4.add({ title: "批量C", password: "z" });
+  ok(s4.list().length === 4, "批量删除前 4 条");
+
+  const batchIds = s4
+    .list()
+    .filter((e) => e.title.startsWith("批量"))
+    .map((e) => e.id);
+  ok(s4.removeMany(batchIds) === 3, "removeMany 返回真正删掉的条数");
+  ok(s4.list().length === 1, "批量删除后剩 1 条");
+
+  // 不存在的 id: 不应计数, 也不应抛错 (列表里并发删除的兜底)
+  ok(s4.removeMany(["no-such-id", ...batchIds]) === 0, "不存在/已删的 id → 返回 0");
+  ok(s4.removeMany([]) === 0, "空数组 → 0 且不报错");
+
+  const s5 = await VaultStore.open(vp, "master-pw-123");
+  ok(s5.list().length === 1, "批量删除已落盘");
+
+  s5.lock();
+  threw = false;
+  try {
+    s5.removeMany(["x"]);
+  } catch {
+    threw = true;
+  }
+  ok(threw, "锁定后 removeMany 拒绝执行 (密钥已清)");
+
+  // --- 主密码二次校验 (批量删除前的防误触) ---
+  const s6 = await VaultStore.open(vp, "master-pw-123");
+  ok(await s6.verifyMasterPassword("master-pw-123"), "正确主密码 → 二次校验通过");
+  ok(!(await s6.verifyMasterPassword("wrong-password")), "错误主密码 → 二次校验失败");
+  ok(!(await s6.verifyMasterPassword("")), "空密码 → 二次校验失败");
+  ok(s6.list().length === 1, "二次校验不影响库内容");
+
   threw = false;
   try {
     await VaultStore.create(vp + "2", "short");

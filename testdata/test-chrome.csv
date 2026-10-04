@@ -1,0 +1,5 @@
+﻿name,url,username,password,note
+知乎,https://www.zhihu.com,user@example.com,zhihu123,
+淘宝,https://www.taobao.com,13800138000,taobao#2020,
+"百度, 主账号",http://www.baidu.com,baidu_user,123456,老账号（含半角逗号测试）
+GitHub,https://github.com,dev@aegis.local,gh_Str0ng!2026,"Git 主账号, 已开 2FA"

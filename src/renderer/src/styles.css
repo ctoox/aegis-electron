@@ -682,6 +682,19 @@ button {
 }
 
 /* ============ 弹窗 ============ */
+/*
+ * 高度自适应: 矮弹窗居中, 高弹窗整页滚。
+ *
+ * 踩过的坑: 早先给 .modal 写 max-height:82vh + overflow-y:auto, 看着像能滚,
+ * 实际「重置主密码」「导出加密分享包」这类弹窗一旦比视口高, 底部那两个
+ * 按钮(确认重置 / 导出 N 条)就被压在裁切线以下, 用户根本够不到 —— 而这
+ * 两个按钮恰恰是弹窗唯一的出口。截图时才发现。
+ *
+ * 现在的分工: 遮罩层负责滚 (overflow-y:auto), 弹窗自己不限高 (max-height:none)
+ * + margin:auto 自动居中。flex 容器里 auto margin 优先级高于 align-items,
+ * 因此内容不高时仍然正中; 内容过高时 auto margin 归零、容器出现滚动条,
+ * **顶部和底部都能滚到**（用 align-items:center 则顶部会溢到负偏移, 滚不回去）。
+ */
 .modal-mask {
   position: fixed;
   inset: 0;
@@ -689,13 +702,15 @@ button {
   display: flex;
   align-items: center;
   justify-content: center;
+  overflow-y: auto;
+  padding: 20px 16px;
   z-index: 50;
 }
 
 .modal {
   width: 420px;
-  max-height: 82vh;
-  overflow-y: auto;
+  max-height: none;
+  margin: auto;
   background: var(--surface);
   border-radius: var(--r-xl);
   padding: 22px;

@@ -1,0 +1,40 @@
+{
+  "format": "aegis-share",
+  "version": 1,
+  "meta": {
+    "title": "来自 Python 的分享包",
+    "created_at": 1791080950,
+    "entries": 3,
+    "sender": "Python 版",
+    "note": "给 Node 版测试用的固定夹具",
+    "hint": "口令就是 python-share-2026"
+  },
+  "kdf": {
+    "type": "argon2id",
+    "params": {
+      "time_cost": 3,
+      "memory_cost": 65536,
+      "parallelism": 1,
+      "hash_len": 32
+    },
+    "salt": "j3XQS/SivYAebpdhEd/Fsg=="
+  },
+  "wrapped_key": "JA/TDD1DUMBLqQp8X2Ftp0tg28mxevYTxhcz2bZrqVavCpXO3q45Pn2tSdJF0k/O99J3Aru3HF/DlHh3",
+  "entries": [
+    {
+      "id": "3c02b766-34fa-44cb-8ed7-5d064f75a0a7",
+      "type": "login",
+      "data": "Wbt3HpAbYSIUkWapzZeNbcbBVjjpdPGnx6k3y1mvY26JFNUiqvHQia5HfkoJP6kIRGPXOBRThpn+rorqZ10cpsBsu9SLp79DZyXBEO9suPGOH3s2SD9N1b/98ELdZTTkCvgUhccuPPImSOdeNEaNfde4Avlw2Fq/s6MHRh+WMgs3ujk9pTlFrWmrm4aUVnlO2LvI/CQjZxzo+J1kWltMZINkdTiBCD/EfOXsHzh1OlKVwPKudE1QeqoFCFmQgip+ZCGELjoxCfoQoc0YX4vwMGAiPQ9EvXJh0a3qPkFcjOjP803G+7wNM1q6+Rv9i9PeM/kSVXdgmLexn8Xc4/ljxglgwOImMRP/N0khqJ4lIIgCB+w3T7g/GnGKXfd2oRZHoQ3qIH9junCdp8IVYd8zxSP4Fn2at3zq+w=="
+    },
+    {
+      "id": "f38ce66d-da77-4f6b-b970-6daf93534379",
+      "type": "login",
+      "data": "+8iWJqO9bSwMXO9uwL4XKbEYFNmyeE8Ajrry1SObQi/mIIOWoCkzPcb+cWUgBx1DTw3cMY/DyLLD2L40oKSGi3gQNMlMSmZFRu2KDI/E1ZAtLl0OWDwxzeHFOV4rNY1jFms2tJddRJTg92YnHaixhErbJIe7WIXQk3tZ53acFV3/cjl0d/8bji/xRSlyObHsl0vQ5eAqBoEeZQrUKmweKb6qeFywp60VVn+Z9GmapvVtWDmyDtaN1X7zs8QOFJk8mEoW3ABWLXUXr9nmL7doxswcSHcVfwZCxc8115vhSCzNGtaemDHCTNMucNDleqGIgfyLAQFVIrUaMoaOHmRxMjQkzGbbALqv2MYqEAjXn8te8BFgLXA7i+A2VTfSSuU6qTb8UKodSATNQVCKRhABfFOIVGEySw=="
+    },
+    {
+      "id": "59ece7ec-fb3d-4750-9d83-9c57f3d4a787",
+      "type": "login",
+      "data": "T0jRKEz/4egMN8zNEDbS5MJ37n8V4hRVZfG0wBOmm8RLH2puChvsRjUEA1SbOiyPI+lyksvN3B6/P4OBCBmufIflP67Hy0e/aRrk4GW0DWeXTuNIX21HrMEthc+phBGbJD1Ee1aPUeFGW22GOmHPRRB7i+i0crO32sHcYfFjivM/4WcJtxpQ+fSOedTWU7MS3jcV/FI6Kzdwg+Y+FFQQh6dXUOXSQsZL/VRKLbGgfAan428hjPxb6hPfu9VPNxZQ+1kSeYcYWaC+StB6pXKxPssT21Qgm6ngbJ+kLfV4VWU9EP6dsLPturhyReJbQKTLUL/2/sG4mMeQNxUNHaBq1q6OtGE+95wWLH+J39/DYeSXYXtBbDm6wsBjAx+viJlE"
+    }
+  ]
+}

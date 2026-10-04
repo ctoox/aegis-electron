@@ -1,0 +1,7 @@
+﻿folder,favorite,type,name,notes,fields,reprompt,login_uri,login_username,login_password,login_totp
+工作/生产环境,1,login,云控制台,"主账号, 勿删（含半角逗号测试）",,0,https://console.cloud.example.com,ops@aegis.local,Str0ng!Pass-2026#x,otpauth://totp/Cloud:ops@aegis.local?secret=JBSWY3DPEHPK3PXP&issuer=Cloud
+工作/生产环境,0,login,生产数据库,只读账号,,0,https://db.example.com,reader@aegis.local,123456,
+个人,1,login,视频会员,,,0,https://vip.example.com,user@example.com,password,
+个人,0,login,老论坛,十年前注册的账号,,0,http://old-forum.example.com,myuser,abc123,
+个人,0,login,网上银行,手机银行登录,,0,https://ebank.example.com,6222****1234,qwerty,
+安全,0,note,恢复码备份,"离线保存的恢复码: ""A1B2-C3D4"" 已使用（含双引号测试）",,0,,,,

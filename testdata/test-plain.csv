@@ -1,0 +1,8 @@
+﻿Title,Username,Password,URL,Notes,TOTP,Group,Favorite,Type
+公司 Wiki,wiki@aegis.local,Wiki#2026,https://wiki.example.com,内部知识库,JBSWY3DPEHPK3PXP,工作,1,login
+测试服务器,root,toor,http://192.168.1.10,内网测试机（Http 明文站点）,,工作,0,login
+内部 Jenkins,admin,toor,http://192.168.1.11,与测试服务器同一个密码 → 用来触发「重复密码」检测,,工作,0,login
+身份证信息,张三,110101199001011234,,,,个人,1,id
+银行卡,6222 **** 1234,123456,,"卡号 6222 8888 0000 1234, 有效期 12/29",,个人,0,bank
+保险箱,家庭密码,family2020,,"""备用钥匙在父母家""（含双引号测试）",,个人,0,note
+游戏账号 🎮,player@example.com,game123,https://game.example.com,"抽卡记录: ""金色传说"" x3",,游戏,0,login

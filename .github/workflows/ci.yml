@@ -1,0 +1,69 @@
+name: ci
+
+# 质量门：每次 push / PR 都跑，快（两个平台合计 2~3 分钟），只在 ubuntu + windows 上跑。
+# macOS 不在这里跑 —— 它贵 10 倍，且测试全是纯 Node，macOS 的差异留到 release.yml 的
+# 真实打包环节去暴露（打包本来就必须在 macOS 原生跑）。
+on:
+  push:
+    branches: ["**"]
+    tags-ignore: ["v*"] # tag 交给 release.yml
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: 质量门 · ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm # registry 走仓库里的 .npmrc（npmmirror）
+
+      # npm ci 严格按 package-lock.json 装，锁不住就红 —— 别用 npm install
+      - run: npm ci
+
+      # 1) 类型
+      - name: 类型检查 (tsc --noEmit)
+        run: npm run typecheck
+
+      # 2) 渲染层纯度：前端零 Node API 的硬约束，传递依赖也查
+      - name: 渲染层纯度 (零 Node API)
+        run: npm run check:purity
+
+      # 3) 打包资源齐备且在版本库里（build/icon.png 曾经被 .gitignore 漏掉过）
+      - name: 打包资源检查
+        run: npm run check:assets
+
+      # 4) 测试：结果同时写进 Actions 摘要，不用点开日志
+      - name: 测试
+        shell: bash
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee test.log
+          {
+            echo "### 测试结果 · ${{ matrix.os }}"
+            echo ""
+            echo '```'
+            grep -E '通过 ✔|✗' test.log || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # 5) 生产构建能编出来 + 产物结构对（打包前最容易漏的一环）
+      - name: 生产构建 (electron-vite build)
+        run: npm run build
+
+      - name: 校验构建产物结构
+        run: npx tsx scripts/check-package-assets.ts --require-out

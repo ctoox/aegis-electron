@@ -1,7 +1,13 @@
 import { useEffect, useState } from "react";
 import { FORMATS, type FormatId } from "../../core/formats";
 import { AUTO_LOCK_CHOICES, CLIP_CLEAR_CHOICES, type Settings } from "../../core/prefs";
-import { api, cleanError, type AppInfo } from "./api";
+import {
+  api,
+  cleanError,
+  type AppInfo,
+  type BackupSnapshot,
+} from "./api";
+import { ChangePasswordModal, ClearAllModal } from "./Security";
 import type { ToastKind } from "./Toast";
 
 type Theme = Settings["theme"];
@@ -28,6 +34,20 @@ function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void 
   );
 }
 
+function sizeText(n: number) {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1048576).toFixed(1)} MB`;
+}
+
+function timeText(ts: number) {
+  const d = new Date(ts);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(
+    d.getHours(),
+  )}:${p(d.getMinutes())}`;
+}
+
 export function SettingsPage(props: {
   settings: Settings;
   onPatch: (patch: Partial<Settings>) => void;
@@ -35,19 +55,59 @@ export function SettingsPage(props: {
   onImport: () => void;
   onExport: (f: FormatId) => void;
   onBackup: () => void;
+  onShareExport: () => void;
+  onShareImport: () => void;
+  /** 库内容被本页改动了 (清空 / 恢复快照) → 让上层刷新条目列表 */
+  onChanged: () => void;
   busy: boolean;
 }) {
-  const { settings, onPatch, notify, onImport, onExport, onBackup, busy } = props;
+  const {
+    settings, onPatch, notify, onImport, onExport, onBackup,
+    onShareExport, onShareImport, onChanged, busy,
+  } = props;
   const [info, setInfo] = useState<AppInfo | null>(null);
   const [exportFormat, setExportFormat] = useState<FormatId>("aegis-json");
+  const [snaps, setSnaps] = useState<BackupSnapshot[]>([]);
+  const [count, setCount] = useState(0);
+  const [pwOpen, setPwOpen] = useState(false);
+  const [clearOpen, setClearOpen] = useState(false);
 
   useEffect(() => {
     api.app.info().then(setInfo).catch(() => {});
+    api.backup.list().then(setSnaps).catch(() => setSnaps([]));
+    api.vault.list().then((l) => setCount(l.length)).catch(() => {});
   }, []);
 
   async function openDir() {
     try {
       await api.app.openDataDir();
+    } catch (e) {
+      notify(cleanError(e), "err");
+    }
+  }
+
+  async function openBackupDir() {
+    try {
+      await api.backup.openDir();
+    } catch (e) {
+      notify(cleanError(e), "err");
+    }
+  }
+
+  /**
+   * 从快照恢复。这不只是"复制个文件" —— 它会打断当前会话, 恢复后必须用
+   * 快照当时的密码重新解锁, 所以确认文案要把这件事说清楚。
+   */
+  async function restoreSnap(s: BackupSnapshot) {
+    const ok = confirm(
+      `用快照「${s.name}」覆盖当前密码库？\n\n` +
+        `· 当前状态会先被另存为一份新快照，所以这一步本身也可以撤回；\n` +
+        `· 恢复完成后密码库会锁定，需要用**该快照当时的密码**解锁。`,
+    );
+    if (!ok) return;
+    try {
+      await api.backup.restore(s.path);
+      notify("已从快照恢复。请用该快照当时的密码解锁。", "warn");
     } catch (e) {
       notify(cleanError(e), "err");
     }
@@ -103,6 +163,15 @@ export function SettingsPage(props: {
         </Row>
         <Row title="泄露检测（HIBP）" desc="健康检查联调用；查询只发送密码 SHA-1 的前 5 位，k-匿名，不发送密码本身">
           <Toggle on={settings.hibpEnabled} onChange={(v) => onPatch({ hibpEnabled: v })} />
+        </Row>
+        <Row
+          title="修改主密码"
+          desc="还记得旧密码、只是想换一个。条目密文一条都不动，数据零损失"
+          stack
+        >
+          <button className="btn-ghost" onClick={() => setPwOpen(true)}>
+            修改主密码…
+          </button>
         </Row>
       </section>
 
@@ -186,6 +255,15 @@ export function SettingsPage(props: {
         >
           <Toggle on={settings.glass} onChange={(v) => onPatch({ glass: v })} />
         </Row>
+        <Row
+          title="关闭窗口时最小化到托盘"
+          desc="关掉后点 × 就退出应用；打开后只是收进系统托盘，点托盘图标能叫回来（退出走托盘右键菜单）"
+        >
+          <Toggle
+            on={settings.closeToTray}
+            onChange={(v) => onPatch({ closeToTray: v })}
+          />
+        </Row>
       </section>
 
       <section className="scard">
@@ -222,9 +300,82 @@ export function SettingsPage(props: {
             备份为密文副本…
           </button>
         </Row>
+
+        <div className="sec-divider">
+          <b>加密分享包</b>
+          <span>
+            把选中的条目打包成<b>密文</b>文件，用独立口令保护。接收方拿到口令才能解开，
+            拿不到你的主密码，也看不到没被选中的条目。与上面的明文导出完全不同。
+          </span>
+        </div>
+        <Row title="导出分享包" desc="选中若干条目后导出（没勾选就是整个库）" stack>
+          <button className="btn-ghost" disabled={busy} onClick={onShareExport}>
+            导出加密分享包…
+          </button>
+        </Row>
+        <Row title="导入分享包" desc="先给明文元信息预览，确认是我要的那个包再输口令" stack>
+          <button className="btn-ghost" disabled={busy} onClick={onShareImport}>
+            选择分享包…
+          </button>
+        </Row>
+
+        <div className="sec-divider">
+          <b>库文件快照</b>
+          <span>
+            每次写盘都会把改动前的库文件留一份在备份目录（本身就是密文），滚动保留最近 10 份。
+            这是误操作、断电、崩溃之后最直接的退路。
+          </span>
+        </div>
+        <Row
+          title={`自动快照（${snaps.length} 份）`}
+          desc={
+            snaps.length
+              ? "新的在前。恢复会用该快照覆盖当前库，并锁定密码库"
+              : "还没有快照 —— 有写入之后才会产生"
+          }
+          stack
+        >
+          {snaps.length === 0 ? (
+            <button className="btn-ghost" onClick={openBackupDir}>
+              打开备份目录
+            </button>
+          ) : (
+            <ul className="snap-list">
+              {snaps.map((s) => (
+                <li key={s.path}>
+                  <span className="snap-name">{s.name}</span>
+                  <span className="snap-meta">
+                    {timeText(s.mtime)} · {sizeText(s.bytes)}
+                  </span>
+                  <button className="snap-act" onClick={() => restoreSnap(s)}>
+                    恢复
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Row>
+
         <Row title="数据目录" desc={info?.vaultPath ?? "…"} stack>
           <button className="btn-ghost" onClick={openDir}>
             在文件管理器中打开
+          </button>
+        </Row>
+
+        <div className="sec-divider danger">
+          <b>危险操作</b>
+          <span>
+            清空只移除条目，主密码不变，且清空前会自动留一份快照（可退回来）。
+            若连主密码也不记得了，请到解锁页用「忘记主密码 → 重置」。
+          </span>
+        </div>
+        <Row title={`清空全部条目（当前 ${count} 条）`} desc="需要输入主密码确认" stack>
+          <button
+            className="btn-danger"
+            disabled={busy || count === 0}
+            onClick={() => setClearOpen(true)}
+          >
+            清空全部密码…
           </button>
         </Row>
       </section>
@@ -247,6 +398,34 @@ export function SettingsPage(props: {
           <p className="muted">读取中…</p>
         )}
       </section>
+
+      {pwOpen && (
+        <ChangePasswordModal
+          onClose={() => setPwOpen(false)}
+          onDone={(msg) => {
+            setPwOpen(false);
+            notify(msg, "ok");
+          }}
+        />
+      )}
+
+      {clearOpen && (
+        <ClearAllModal
+          count={count}
+          onClose={() => setClearOpen(false)}
+          onDone={(removed) => {
+            setClearOpen(false);
+            setCount(0);
+            notify(
+              `已清空 ${removed} 个条目（清空前的快照已留在备份目录，需要时可在上方恢复）`,
+              "ok",
+            );
+            // 快照列表多了一份"清空前"的; 上层也要刷新条目列表
+            api.backup.list().then(setSnaps).catch(() => {});
+            onChanged();
+          }}
+        />
+      )}
     </main>
   );
 }

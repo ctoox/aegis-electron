@@ -2,10 +2,12 @@ import {
   app,
   shell,
   nativeTheme,
+  nativeImage,
   BrowserWindow,
   ipcMain,
   Menu,
   MenuItemConstructorOptions,
+  Tray,
   clipboard,
   dialog,
 } from "electron";
@@ -17,7 +19,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import * as os from "node:os";
-import { basename, join } from "node:path";
+import { basename, join, resolve, sep } from "node:path";
 import {
   generatePassphrase,
   generatePassword,
@@ -29,6 +31,21 @@ import { totpView } from "../core/totp";
 import { KDF_PARAMS } from "../core/crypto";
 import { analyzeWithBreach } from "../core/health";
 import { makeBreachChecker } from "../core/hibp";
+import { listHistory } from "../core/history";
+import {
+  backupDirFor,
+  backupNow,
+  listSnapshots,
+  restoreSnapshot,
+} from "../core/backup";
+import {
+  bundleFingerprint,
+  bundleToJson,
+  defaultShareFilename,
+  describeBundle,
+  exportBundle,
+  importBundle,
+} from "../core/share";
 import {
   FORMATS,
   buildExport,
@@ -48,7 +65,10 @@ import type { Entry, VaultStatus } from "../core/types";
 
 let vault: VaultStore | null = null;
 let mainWindow: BrowserWindow | null = null;
+let tray: Tray | null = null;
 let settings: Settings = { ...DEFAULT_SETTINGS };
+/** 真正要退出时才置 true —— 区分「关窗进托盘」与「退出应用」 */
+let isQuitting = false;
 
 /** 用户数据目录 (延迟到 app ready 后取, 保证 app.getPath 可用) */
 let userDataDir = "";
@@ -178,6 +198,16 @@ function createWindow(): void {
     if (settings.lockOnBlur && vault?.unlocked) lockVault("blur");
   });
 
+  // 关窗: 默认退出应用; 开了「关闭时最小化到托盘」就只藏起来 (托盘还在,
+  // 点托盘图标能叫回来). 注意必须 preventDefault, 否则窗口真被销毁了,
+  // 托盘上就没了可以 show() 的目标.
+  win.on("close", (e) => {
+    if (!isQuitting && settings.closeToTray && tray) {
+      e.preventDefault();
+      win.hide();
+    }
+  });
+
   if (process.env["ELECTRON_RENDERER_URL"]) {
     win.loadURL(process.env["ELECTRON_RENDERER_URL"]);
   } else {
@@ -217,6 +247,7 @@ function lockVault(reason: LockReason): VaultStatus {
   vault = null;
   if (settings.clearClipboardOnLock) wipeClipboard(true);
   mainWindow?.webContents.send("vault:locked", reason);
+  refreshTrayMenu();
   return vaultStatus();
 }
 
@@ -283,6 +314,78 @@ function copyToClipboard(text: string): { clearIn: number } {
   return { clearIn: secs };
 }
 
+// ============================================================ 系统托盘
+
+function showMainWindow(): void {
+  if (!mainWindow) {
+    createWindow();
+    return;
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  if (!mainWindow.isVisible()) mainWindow.show();
+  mainWindow.focus();
+}
+
+/**
+ * 托盘图标. 打包后 build/ 被塞进 app.asar (见 package.json 的 build.files),
+ * 开发时 app.getAppPath() 就是项目根 —— 两种情况同一个拼接方式.
+ * createFromPath 能读 asar 内的路径, 不需要额外解包.
+ *
+ * ⚠ 这里是"静默失败"高发区: 图标不在包里时 createFromPath 不抛错, 只返回空图,
+ * 表现是"打包后托盘一片空白"而控制台干干净净。所以空图必须吼一声 ——
+ * 排查这类问题最费时间的就是"没有任何线索"。
+ */
+function trayIcon(): Electron.NativeImage {
+  const file = join(app.getAppPath(), "build", "icon.png");
+  const img = nativeImage.createFromPath(file);
+  if (img.isEmpty()) {
+    console.warn(
+      `[tray] 托盘图标读不出来, 托盘会是空白的: ${file}\n` +
+        `        检查 package.json 的 build.files 有没有把 "build/icon.png" 打进去`,
+    );
+    return img;
+  }
+  return img.resize({ width: 16, height: 16 });
+}
+
+function buildTray(): void {
+  if (tray) return;
+  try {
+    tray = new Tray(trayIcon());
+  } catch {
+    // 某些 Linux 桌面没有 StatusNotifier 宿主, 创建托盘会直接抛错 —— 静默降级
+    tray = null;
+    return;
+  }
+  refreshTrayMenu();
+  tray.setToolTip("神盾 Aegis");
+  // 左键点托盘图标: 把窗口叫回来 (Windows/Linux 的常规习惯)
+  tray.on("click", showMainWindow);
+}
+
+/** 库的解锁状态变了就重建菜单, 让「锁定密码库」的可用态跟着变 */
+function refreshTrayMenu(): void {
+  if (!tray) return;
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      { label: "显示主窗口", click: showMainWindow },
+      {
+        label: "锁定密码库",
+        enabled: vault?.unlocked ?? false,
+        click: () => lockVault("manual"),
+      },
+      { type: "separator" },
+      {
+        label: "退出神盾",
+        click: () => {
+          isQuitting = true;
+          app.quit();
+        },
+      },
+    ]),
+  );
+}
+
 // ============================================================ 泄露检测
 
 const breachChecker = makeBreachChecker();
@@ -297,25 +400,64 @@ function openDialog(opts: Electron.OpenDialogOptions): Promise<Electron.OpenDial
   return mainWindow ? dialog.showOpenDialog(mainWindow, opts) : dialog.showOpenDialog(opts);
 }
 
+// ============================================================ 单实例保护
+
+/**
+ * 为什么必须有: 两个实例同时打开**同一个库文件**时, 各自在内存里持有一份
+ * 独立副本, 而 save() 是整文件覆盖 —— 后保存的那个会把先前实例写入的
+ * 内容全部抹掉。
+ *
+ * 这不是理论风险: 2026-10-02 就因此把用户的密码库写成了空库
+ * (桌面快捷方式被双击两次, 09:40:30 与 09:40:46 各起了一个进程,
+ *  09:41:17 库文件变成 551 B / 0 条目)。加锁是防这类数据丢失的正解。
+ *
+ * 行为: 拿不到锁 → 本进程直接退出; 已持有锁的进程收到 second-instance →
+ * 把已有窗口还原并置前 (用户第二次双击的表现是"窗口跳到面前", 而不是
+ * "没反应"或"开了第二个")。
+ */
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+
 // ============================================================ 启动
 
-app.whenReady().then(() => {
-  userDataDir = app.getPath("userData");
-  settings = loadSettings(userDataDir);
-  buildMenu();
-  createWindow();
-  startLockWatcher();
-  app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+if (!hasSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    if (!mainWindow) {
+      // 窗口被关掉但进程还在 (macOS 习惯): 重新开一个
+      createWindow();
+      return;
+    }
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    if (!mainWindow.isVisible()) mainWindow.show();
+    mainWindow.focus();
   });
-});
 
-app.on("window-all-closed", () => {
-  // macOS 习惯: 关窗不退出应用(Dock 保留), 其他平台退出
-  if (process.platform !== "darwin") app.quit();
-  vault?.lock();
-  vault = null;
-});
+  app.whenReady().then(() => {
+    userDataDir = app.getPath("userData");
+    settings = loadSettings(userDataDir);
+    buildMenu();
+    createWindow();
+    buildTray();
+    startLockWatcher();
+    app.on("activate", () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    });
+  });
+
+  // 退出前把 isQuitting 立起来, 否则 close-to-tray 的 preventDefault 会
+  // 把「退出神盾」也挡下来, 应用永远退不掉
+  app.on("before-quit", () => {
+    isQuitting = true;
+  });
+
+  app.on("window-all-closed", () => {
+    // macOS 习惯: 关窗不退出应用(Dock 保留), 其他平台退出
+    if (process.platform !== "darwin") app.quit();
+    vault?.lock();
+    vault = null;
+  });
+}
 
 // ---- IPC: 冒烟 + 自绘标题栏的窗口控制 ----
 ipcMain.handle("greet", (_e, name: string) => `后端已连通, ${name}!`);
@@ -365,6 +507,7 @@ ipcMain.handle("vault:create", async (_e, password: string, hint: string) => {
   touch();
   if (vault) vault.lock();
   vault = await VaultStore.create(vaultPath(), password, hint ?? "");
+  refreshTrayMenu();
   return vaultStatus();
 });
 
@@ -372,6 +515,7 @@ ipcMain.handle("vault:unlock", async (_e, password: string) => {
   touch();
   if (vault?.unlocked) return vaultStatus();
   vault = await VaultStore.open(vaultPath(), password);
+  refreshTrayMenu();
   return vaultStatus();
 });
 
@@ -401,6 +545,20 @@ ipcMain.handle("vault:remove", (_e, id: string) => {
   return vault.remove(id);
 });
 
+/** 批量删除 (列表多选). 只在最后落盘一次; 返回真正删掉的条数 */
+ipcMain.handle("vault:removeMany", (_e, ids: string[]) => {
+  touch();
+  if (!vault?.unlocked) throw new Error("密码库未解锁");
+  return vault.removeMany(Array.isArray(ids) ? ids : []);
+});
+
+/** 二次校验主密码: 批量删除前的防误触确认 (重新派生一次 Argon2id, 有半秒开销) */
+ipcMain.handle("vault:verify", async (_e, password: string) => {
+  touch();
+  if (!vault?.unlocked) throw new Error("密码库未解锁");
+  return vault.verifyMasterPassword(String(password ?? ""));
+});
+
 /** 加密库文件整体备份 (复制 aegis.vault.json, 仍是密文) */
 ipcMain.handle("vault:exportBackup", async () => {
   touch();
@@ -417,6 +575,217 @@ ipcMain.handle("vault:exportBackup", async () => {
   const doc = JSON.parse(readFileSync(src, "utf8"));
   return { path: r.filePath, count: (doc.entries ?? []).length };
 });
+
+// ---- IPC: 主密码的三种命运 ----
+//
+// 三个操作经常被混淆, 语义差别很大, 这里写清楚:
+//   changePassword  还记得旧密码, 只想换一个 → 只重包 DEK, **密文一条不动**
+//   reset           旧密码忘了 → 换掉整把钥匙 (新 DEK), 旧数据放弃, 新库为空
+//   clearAll        密码照旧, 只是把条目清空 → 可从自动快照退回
+
+ipcMain.handle(
+  "vault:changePassword",
+  async (_e, oldPw: string, newPw: string, hint: string) => {
+    touch();
+    if (!vault?.unlocked) throw new Error("密码库未解锁");
+    await vault.changePassword(
+      String(oldPw ?? ""),
+      String(newPw ?? ""),
+      String(hint ?? ""),
+    );
+    return vaultStatus();
+  },
+);
+
+/** 重置: **不需要解锁** —— 这正是"密码忘了进不去"时用的 */
+ipcMain.handle(
+  "vault:reset",
+  async (_e, newPw: string, hint: string, keepBackup: boolean) => {
+    touch();
+    vault?.lock();
+    vault = null;
+    const { store, backupPath } = await VaultStore.reset(
+      vaultPath(),
+      String(newPw ?? ""),
+      String(hint ?? ""),
+      keepBackup !== false,
+    );
+    vault = store;
+    refreshTrayMenu();
+    return { ...vaultStatus(), backupPath };
+  },
+);
+
+/** 清空全部条目: 破坏性操作, 要求二次校验主密码 (不是"库已解锁"就够) */
+ipcMain.handle("vault:clearAll", async (_e, password: string) => {
+  touch();
+  if (!vault?.unlocked) throw new Error("密码库未解锁");
+  if (!(await vault.verifyMasterPassword(String(password ?? "")))) {
+    throw new Error("主密码不正确, 未执行清空");
+  }
+  return vault.clearAll();
+});
+
+// ---- IPC: 条目历史版本 ----
+ipcMain.handle("vault:history", (_e, id: string) => {
+  touch();
+  if (!vault?.unlocked) throw new Error("密码库未解锁");
+  const e = vault.get(String(id ?? ""));
+  return e ? listHistory(e) : [];
+});
+
+ipcMain.handle("vault:restoreHistory", (_e, id: string, index: number) => {
+  touch();
+  if (!vault?.unlocked) throw new Error("密码库未解锁");
+  return vault.restoreHistory(String(id ?? ""), Number(index));
+});
+
+// ---- IPC: 库文件快照 (backups/ 下的自动滚动备份) ----
+
+ipcMain.handle("backup:list", () => {
+  touch();
+  // 新的排前面 (listSnapshots 按文件名升序 → 反转)
+  return listSnapshots(vaultPath())
+    .reverse()
+    .map((p) => {
+      let bytes = 0;
+      let mtime = 0;
+      try {
+        const st = statSync(p);
+        bytes = st.size;
+        mtime = st.mtimeMs;
+      } catch {
+        /* 刚被轮换掉, 忽略 */
+      }
+      return { path: p, name: basename(p), bytes, mtime };
+    });
+});
+
+ipcMain.handle("backup:restore", async (_e, snapPath: string) => {
+  touch();
+  // 只允许恢复 backups/ 目录里的东西 —— 否则渲染层递个任意路径过来
+  // 就等于拿到了"写任意文件"的能力
+  const dir = resolve(backupDirFor(vaultPath()));
+  const target = resolve(String(snapPath ?? ""));
+  if (target !== dir && !target.startsWith(dir + sep)) {
+    throw new Error("快照路径不在备份目录内");
+  }
+  if (!existsSync(target)) throw new Error("快照不存在");
+
+  // 恢复前先把"当前状态"也留一份 —— 恢复错了还能回来
+  backupNow(vaultPath());
+  vault?.lock();
+  vault = null;
+  restoreSnapshot(vaultPath(), target);
+  refreshTrayMenu();
+  mainWindow?.webContents.send("vault:locked", "restore");
+  return vaultStatus();
+});
+
+/** 打开 backups/ 目录, 让用户自己看一眼那些 .bak */
+ipcMain.handle("backup:openDir", async () => {
+  const dir = backupDirFor(vaultPath());
+  await shell.openPath(existsSync(dir) ? dir : userDataDir);
+});
+
+// ---- IPC: 加密分享包 ----
+
+ipcMain.handle(
+  "share:export",
+  async (
+    _e,
+    ids: string[],
+    opts: {
+      password?: string;
+      title?: string;
+      sender?: string;
+      note?: string;
+      hint?: string;
+    } = {},
+  ) => {
+    touch();
+    if (!vault?.unlocked) throw new Error("密码库未解锁");
+    const all = vault.list();
+    const wanted = Array.isArray(ids) ? new Set(ids) : null;
+    const picked = wanted?.size ? all.filter((e) => wanted.has(e.id)) : all;
+    if (!picked.length) throw new Error("没有可分享的条目");
+
+    const bundle = await exportBundle(picked, String(opts.password ?? ""), {
+      title: opts.title,
+      sender: opts.sender,
+      note: opts.note,
+      hint: opts.hint,
+    });
+    const r = await saveDialog({
+      title: "导出加密分享包",
+      defaultPath: join(
+        app.getPath("documents"),
+        defaultShareFilename(opts.title ?? "神盾分享包"),
+      ),
+      filters: [{ name: "神盾分享包 (密文)", extensions: ["json"] }],
+    });
+    if (r.canceled || !r.filePath) return null;
+    writeFileSync(r.filePath, bundleToJson(bundle), "utf8");
+    return {
+      path: r.filePath,
+      count: bundle.entries.length,
+      fingerprint: bundleFingerprint(bundle),
+    };
+  },
+);
+
+/** 选一个分享包并读出**明文**元信息 (不解密, 不需要口令) */
+ipcMain.handle("share:pickImport", async () => {
+  touch();
+  if (!vault?.unlocked) throw new Error("请先解锁密码库");
+  const r = await openDialog({
+    title: "选择神盾分享包",
+    properties: ["openFile"],
+    filters: [{ name: "神盾分享包", extensions: ["json"] }],
+  });
+  if (r.canceled || !r.filePaths[0]) return null;
+  const p = r.filePaths[0];
+  const size = statSync(p).size;
+  if (size > 64 * 1024 * 1024) {
+    throw new Error(`文件 ${(size / 1048576).toFixed(1)} MB 超过 64 MB 上限`);
+  }
+  let doc: unknown;
+  try {
+    doc = JSON.parse(readFileSync(p, "utf8"));
+  } catch {
+    throw new Error("分享包损坏 (JSON 解析失败)");
+  }
+  // describeBundle 内部会做格式校验, 不是神盾分享包会在这里被挡下
+  const info = describeBundle(doc);
+  return { info, fileName: basename(p), bytes: size, doc };
+});
+
+ipcMain.handle(
+  "share:commitImport",
+  async (
+    _e,
+    doc: unknown,
+    password: string,
+    opts: { forceNewIds?: boolean } = {},
+  ) => {
+    touch();
+    if (!vault?.unlocked) throw new Error("密码库未解锁");
+    const existing = vault.list().map((e) => e.id);
+    const res = await importBundle(doc, String(password ?? ""), {
+      existingIds: existing,
+      forceNewIds: !!opts.forceNewIds,
+    });
+    // addMany 里 newEntry 先生成随机 id 再被 spread 覆盖 → 分享包里的 id 得以保留
+    const created = vault.addMany(res.entries);
+    return {
+      added: created.length,
+      skipped: res.skipped,
+      rekeyed: res.rekeyed,
+      title: res.title,
+      sender: res.sender,
+    };
+  },
+);
 
 // ---- IPC: 生成器 ----
 ipcMain.handle("pw:generate", (_e, opts: GenOptions) => generatePassword(opts));

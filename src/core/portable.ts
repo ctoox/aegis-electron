@@ -271,8 +271,10 @@ function parseFavorite(v: string | undefined): boolean {
 function mapType(v: string | undefined): EntryType {
   const s = (v ?? "").trim().toLowerCase();
   if (s === "note" || s === "secure note" || s === "securenote" || s === "2" || s === "笔记") return "note";
-  if (s === "card" || s === "credit card" || s === "3" || s === "银行卡") return "bank";
-  if (s === "identity" || s === "4" || s === "身份") return "id";
+  // "bank" / "id" 是 plain-csv 导出时写出的原始字面量, 必须认得 ——
+  // 否则自家导出的文件再导入, 银行卡/证件会被悄悄吃掉类型变成 login
+  if (s === "bank" || s === "card" || s === "credit card" || s === "3" || s === "银行卡") return "bank";
+  if (s === "id" || s === "identity" || s === "4" || s === "身份") return "id";
   return "login";
 }
 
@@ -466,11 +468,15 @@ function fromBitwardenJson(text: string): ImportPreview {
 
   for (const it of items) {
     const t = Number(it?.type);
-    if (t !== 1 && t !== 2) {
-      const k = t === 3 ? "银行卡" : t === 4 ? "身份" : `类型 ${it?.type}`;
+    // 1=login 2=secure note 3=card 4=identity. 只有真正未知的类型才跳过 ——
+    // 曾经把 3/4 一并跳过, 结果自家导出的银行卡/证件再导入就整条消失.
+    if (t !== 1 && t !== 2 && t !== 3 && t !== 4) {
+      const k = `类型 ${it?.type}`;
       skipped[k] = (skipped[k] ?? 0) + 1;
       continue;
     }
+    const kind: EntryType = t === 2 ? "note" : t === 3 ? "bank" : t === 4 ? "id" : "login";
+
     const extra: Record<string, string> = {};
     const g = folderName.get(String(it?.folderId ?? ""));
     if (g) extra.group = g;
@@ -479,12 +485,47 @@ function fromBitwardenJson(text: string): ImportPreview {
     for (const f of it?.fields ?? []) {
       if (f?.name) extra[`field:${String(f.name)}`] = String(f.value ?? "");
     }
+
+    const put = (k: string, v: unknown) => {
+      if (v !== null && v !== undefined && String(v).trim()) extra[`field:${k}`] = String(v);
+    };
+
+    // Bitwarden 的 card / identity 是独立结构体, 转成本项目对应的 bank / id 条目;
+    // 关键信息落进自定义字段, 免得「导入进来只是一张空卡」
+    if (kind === "bank" && it?.card) {
+      const c = it.card;
+      put("卡组织", c.brand);
+      put("持卡人", c.cardholderName);
+      put("卡号", c.number);
+      put("有效期", [c.expMonth, c.expYear].filter(Boolean).join("/"));
+      put("安全码", c.code);
+    }
+    if (kind === "id" && it?.identity) {
+      const v = it.identity;
+      put("称谓", v.title);
+      put("姓名", [v.firstName, v.middleName, v.lastName].filter(Boolean).join(" "));
+      put("证件号", v.ssn);
+      put("护照号", v.passportNumber);
+      put("驾照号", v.licenseNumber);
+      put("公司", v.company);
+      put("邮箱", v.email);
+      put("电话", v.phone);
+      put(
+        "地址",
+        [v.address1, v.address2, v.address3, v.city, v.state, v.postalCode, v.country]
+          .filter(Boolean)
+          .join(" "),
+      );
+    }
+
     const uri = it?.login?.uris?.[0]?.uri ?? "";
+    const fallbackUser =
+      kind === "bank" ? it?.card?.number ?? "" : kind === "id" ? it?.identity?.username ?? "" : "";
     entries.push(
       makeEntry({
-        type: t === 2 ? "note" : "login",
+        type: kind,
         title: String(it?.name ?? ""),
-        username: String(it?.login?.username ?? ""),
+        username: String(it?.login?.username ?? fallbackUser ?? ""),
         password: String(it?.login?.password ?? ""),
         url: String(uri ?? ""),
         notes: String(it?.notes ?? ""),
@@ -728,29 +769,69 @@ const EXPORTERS: Record<FormatId, (entries: Entry[]) => string> = {
       {
         encrypted: false,
         folders: folders.map((f) => ({ id: folderId.get(f), name: f })),
-        items: entries.map((e) => ({
-          id: e.id,
-          organizationId: null,
-          folderId: e.extra?.group ? folderId.get(e.extra.group) ?? null : null,
-          type: typeCode[e.type] ?? 1,
-          reprompt: 0,
-          name: e.title,
-          notes: e.notes || null,
-          favorite: e.favorite,
-          fields: customFields(e).map(([name, value]) => ({ name, value, type: 0 })),
-          login:
-            e.type === "login"
-              ? {
-                  fido2Credentials: null,
-                  uris: e.url ? [{ match: null, uri: e.url }] : [],
-                  username: e.username || null,
-                  password: e.password || null,
-                  totp: totpOf(e) || null,
-                }
-              : null,
-          creationDate: new Date(e.created_at).toISOString(),
-          revisionDate: new Date(e.updated_at).toISOString(),
-        })),
+        items: entries.map((e) => {
+          const f = (k: string) => e.extra?.[`field:${k}`] ?? null;
+          const exp = String(e.extra?.["field:有效期"] ?? "").split("/");
+          return {
+            id: e.id,
+            organizationId: null,
+            folderId: e.extra?.group ? folderId.get(e.extra.group) ?? null : null,
+            type: typeCode[e.type] ?? 1,
+            reprompt: 0,
+            name: e.title,
+            notes: e.notes || null,
+            favorite: e.favorite,
+            fields: customFields(e).map(([name, value]) => ({ name, value, type: 0 })),
+            login:
+              e.type === "login"
+                ? {
+                    fido2Credentials: null,
+                    uris: e.url ? [{ match: null, uri: e.url }] : [],
+                    username: e.username || null,
+                    password: e.password || null,
+                    totp: totpOf(e) || null,
+                  }
+                : null,
+            // card / identity 是 Bitwarden 的独立结构体, 补上它导出到 Bitwarden
+            // 才不是一张空卡 (也保证我们自己的 bank/id 条目能双向往返)
+            card:
+              e.type === "bank"
+                ? {
+                    cardholderName: f("持卡人"),
+                    brand: f("卡组织"),
+                    number: e.username || f("卡号"),
+                    expMonth: exp[0] || null,
+                    expYear: exp[1] || null,
+                    code: f("安全码"),
+                  }
+                : null,
+            identity:
+              e.type === "id"
+                ? {
+                    title: f("称谓"),
+                    firstName: null,
+                    middleName: null,
+                    lastName: f("姓名"),
+                    address1: f("地址"),
+                    address2: null,
+                    address3: null,
+                    city: null,
+                    state: null,
+                    postalCode: null,
+                    country: null,
+                    company: f("公司"),
+                    email: f("邮箱"),
+                    phone: f("电话"),
+                    ssn: f("证件号"),
+                    username: e.username || null,
+                    passportNumber: f("护照号"),
+                    licenseNumber: f("驾照号"),
+                  }
+                : null,
+            creationDate: new Date(e.created_at).toISOString(),
+            revisionDate: new Date(e.updated_at).toISOString(),
+          };
+        }),
       },
       null,
       2,
