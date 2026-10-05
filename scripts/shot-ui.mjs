@@ -499,6 +499,46 @@ async function main() {
     check(clipUi.hint, "★ 写明了「清空剪贴板会被同步到另一台机器」（无界鼠标那个坑）");
     check(clipUi.trayClear, "提示指向了托盘的「清除剪贴板中的密码」");
 
+    // ---- 渲染性能的回归护栏 (docs/RENDER-PERF.md) ----
+    // 玻璃模式下**不允许**再给静态面板挂 backdrop-filter: 它们背后只有那张
+    // 不动的底图, 逐帧重算模糊会把滚动从 60fps 打到 4fps
+    // (实测 p95 250ms → 15.7ms)。真正该模糊的只有盖在滚动内容上的浮层。
+    const glassPerf = JSON.parse(
+      String(
+        await cdp.js(`
+          const blurred = [...document.querySelectorAll("*")].filter((e) => {
+            const s = getComputedStyle(e);
+            const v = s.backdropFilter || s.webkitBackdropFilter || "none";
+            return v && v !== "none";
+          });
+          const base = getComputedStyle(document.body, "::before");
+          return JSON.stringify({
+            glass: document.documentElement.dataset.glass,
+            mat: document.documentElement.dataset.mat,
+            n: blurred.length,
+            names: blurred.map((e) => e.className || e.tagName).slice(0, 6),
+            basePos: base.position,
+            baseContent: base.content,
+          });
+        `),
+      ),
+    );
+    console.log(
+      `    · data-glass=${glassPerf.glass} 材质=${glassPerf.mat} 带模糊的元素=${glassPerf.n} 底图层 position=${glassPerf.basePos}`,
+    );
+    // ★ 预置条件: 玻璃得是开的 —— 不然下面那条在"关闭玻璃"下恒真(本来就没模糊)
+    check(glassPerf.glass === "on", "预置条件: 当前玻璃效果是开启的");
+    check(
+      glassPerf.n === 0,
+      `★ 玻璃模式下没有静态面板挂 backdrop-filter (实际 ${glassPerf.n} 个: ${glassPerf.names.join(", ")})`,
+    );
+    // 底图必须是独立固定图层 —— 退回 background-attachment: fixed 会让它留在
+    // body 的绘制阶段里反复参与合成 (实测 p95 从 15.7ms 涨到 31.3ms)
+    check(
+      glassPerf.mat !== "inapp" || (glassPerf.basePos === "fixed" && glassPerf.baseContent !== "none"),
+      "底图是独立的 fixed 图层 (不是 body 的 background-attachment)",
+    );
+
     // ---- 9. 快速填充（Auto-Type）----
     //   这一组是**安全护栏**: "面板看不到密码"和"面板弹出来不会把自己的库锁掉"
     //   都属于"改坏了不会报错、只会静默变危险"的那一类, 必须由脚本盯着。

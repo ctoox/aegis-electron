@@ -1119,19 +1119,49 @@ button {
 }
 
 /* ---- 页内玻璃: 先给窗口铺一张"有内容"的底图, 玻璃才有东西可糊 ---- */
+/*
+ * 底图挪到一个 position:fixed 的独立图层, 而不是 body 的
+ * `background-attachment: fixed` —— 后者会让这张渐变一直挂在 body 的
+ * 绘制阶段里参与合成; 前者只会被栅格化一次。
+ * z-index:-1 让它落在 .app 内容之下、body 背景之上（body 背景已让开）。
+ */
 :root[data-mat="inapp"][data-glass="on"] body {
-  background: var(--g-bg);
-  background-attachment: fixed;
+  background: transparent;
 }
 
-/* ---- 四块面板: 半透明 + 模糊 ---- */
-:root[data-glass="on"] .titlebar,
-:root[data-glass="on"] .sidebar,
-:root[data-glass="on"] .listbar,
-:root[data-glass="on"] .detail {
-  -webkit-backdrop-filter: var(--g-blur);
-  backdrop-filter: var(--g-blur);
+:root[data-mat="inapp"][data-glass="on"] body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background: var(--g-bg);
+  pointer-events: none;
 }
+
+/* ---- 四块面板: 只做半透明, **刻意不做** backdrop-filter ---- */
+/*
+ * ★ 这一节没有 backdrop-filter 是性能优化的核心结论, 别再加回来。
+ *
+ * 这四块面板的背后只有 body 那张**静态**彩色底图。对一张不动的东西做
+ * blur(30px), 每帧算出来完全一样 —— 纯粹白烧 GPU; 而 Chromium 在滚动时
+ * 并不会替你记住这个结果, 是实打实逐帧重算。
+ *
+ * 实测 (scripts/bench-render.mjs, Win10 / inapp 路径, 设置页滚动 + hover):
+ *
+ *   全保留模糊          均值 82ms   p95 250ms   (约 4fps, 肉眼明显卡)
+ *   只去掉 .page        均值 50ms   p95 110ms   (-56%)
+ *   只去掉 .sidebar     均值 63ms   p95 188ms   (-25%)
+ *   四块全去掉          均值 17ms   p95  31ms   (-88%, 0 掉帧)
+ *
+ * 差 0 掉帧的那一行就是"关闭玻璃"的水平 —— 也就是说模糊本身几乎没换来
+ * 任何观感, 却让滚动掉到 4fps。
+ *
+ * 视觉差别只在色块边缘的柔化程度, 而底图本来就是渐变 —— 前后截图逐像素
+ * 比对过 (见 docs/RENDER-PERF.md)。
+ *
+ * 真正**值得**模糊的是浮层, 它们背后是会滚动的内容, 模糊才有意义:
+ * 见下面 .cmd / .modal。那种模糊只在浮层打开时才算, 不落在滚动上。
+ */
 
 :root[data-glass="on"] .titlebar {
   background: var(--g-lo);
@@ -1152,11 +1182,15 @@ button {
   background: var(--g-veil);
 }
 
-/* ---- 卡片 / 浮层: 一层更亮的玻璃 ---- */
-:root[data-glass="on"] .health-card,
-:root[data-glass="on"] .search,
-:root[data-glass="on"] .detail-card,
-:root[data-glass="on"] .gate-card,
+/* ---- 浮层: 只有这两个真的需要模糊 ---- */
+/*
+ * .cmd (命令面板) / .modal (弹窗) 的背后是**会滚动的内容** —— 模糊出来才是
+ * "毛玻璃盖在内容上"的观感, 而且它们是按需打开的, 代价不落在日常滚动上。
+ *
+ * 原来这一组里还有 .health-card / .search / .detail-card / .gate-card:
+ * 它们的背后同样是那张静态底图, 属于上面"不做模糊"那一类, 已挪走 ——
+ * 其中 .health-card 单独一项就占了 p95 的 7~10ms。
+ */
 :root[data-glass="on"] .cmd,
 :root[data-glass="on"] .modal {
   background: var(--g-hi);
@@ -1164,6 +1198,16 @@ button {
   box-shadow: var(--g-rim), var(--g-shadow);
   -webkit-backdrop-filter: var(--g-blur);
   backdrop-filter: var(--g-blur);
+}
+
+/* 这几类同样是"更亮的玻璃"外观, 但**不模糊**（理由同上） */
+:root[data-glass="on"] .health-card,
+:root[data-glass="on"] .search,
+:root[data-glass="on"] .detail-card,
+:root[data-glass="on"] .gate-card {
+  background: var(--g-hi);
+  border-color: var(--g-line);
+  box-shadow: var(--g-rim), var(--g-shadow);
 }
 
 :root[data-glass="on"] .gate-card {

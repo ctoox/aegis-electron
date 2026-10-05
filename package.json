@@ -37,6 +37,7 @@
     "check:share-interop": "echo \"跨实现互通测试：需要另一实现（Python 版）的环境，该实现不在本仓库内。用法见 scripts/interop-share.py 文件头。\"",
     "smoke": "node scripts/smoke-electron.mjs",
     "shot:ui": "node scripts/shot-ui.mjs",
+    "bench:render": "node scripts/bench-render.mjs",
     "seed:visual": "tsx scripts/seed-visual-demo.ts",
     "list:asar": "node scripts/list-asar.mjs",
     "build:native": "node scripts/build-native.mjs",

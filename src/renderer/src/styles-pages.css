@@ -747,10 +747,13 @@ input[type="range"] {
 .imp-check input { accent-color: var(--accent); }
 
 /* ============ 玻璃模式下的新增面板 ============ */
+/*
+ * ★ .page **不加** backdrop-filter —— 它是页面的滚动容器, 给它挂模糊等于
+ *   "每一次滚动都要把整个右半屏重新糊一遍"。实测这一项单独就占 p95 的 56%。
+ *   理由与完整数据见 styles.css 里那节注释 / docs/RENDER-PERF.md。
+ */
 :root[data-glass="on"] .page {
   background: var(--g-veil);
-  backdrop-filter: var(--g-blur);
-  -webkit-backdrop-filter: var(--g-blur);
 }
 
 :root[data-glass="on"] .scard,

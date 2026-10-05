@@ -258,10 +258,20 @@ npm run smoke -- --exe release/win-unpacked/AegisNext.exe   # 冒烟打包产物
 npm run shot:ui -- --user-data-dir "$TEMP/aegis-vis" --password visual-check-123
                                            # 走 CDP 真实点击并截图，顺带断言弹窗按钮够不够得着
 node scripts/verify-autotype-native.mjs    # 真机验证自动打字：往记事本打一串中文/emoji 再读回比对
+npm run bench:render -- --user-data-dir "$TEMP/aegis-vis" --password visual-check-123
+                                           # 渲染流畅度基准：滚动/hover 下的逐帧耗时
 ```
 
 `shot:ui` 通过 Chrome DevTools Protocol（`--remote-debugging-port`）驱动界面而不是抓窗口，
 所以能真正点击、能拿到精确像素，也不受窗口被遮挡或最小化影响。
+
+`bench:render` 用同一条 CDP 通道测 `requestAnimationFrame` 的帧间隔（不是脚本耗时）——
+它能回答「玻璃效果到底卡不卡」而不是靠感觉；加 `--ablate` 可以逐个关掉某层模糊来定位瓶颈。
+2026-10 用它把玻璃模式的滚动从 **4fps 修回 60fps**（p95 250ms → 15.7ms，0 掉帧），
+过程与规则见 [`docs/RENDER-PERF.md`](docs/RENDER-PERF.md)。
+
+> **性能红线**：不要给「背后是静态底图」的面板加 `backdrop-filter` ——
+> 它买不到观感，只按帧收费。`shot:ui` 里有护栏盯着这一条。
 
 `verify-autotype-native.mjs` 是**唯一**需要真实桌面会话的脚本：它会开一个记事本、切到前台、
 把 `神盾Aegis·测试🚀✓—0O1l` 当作键盘输入发过去，再用 `WM_GETTEXT` 读回来逐字比对 ——
