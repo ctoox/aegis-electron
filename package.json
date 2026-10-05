@@ -99,11 +99,13 @@
       "description": "本地优先、零知识加密的开源密码管理器。密码只存在本机，无账号、无云端、无遥测。",
       "maintainer": "神盾 Aegis <aegis@users.noreply.github.com>",
       "desktop": {
-        "Name": "神盾 Aegis",
-        "GenericName": "密码管理器",
-        "Comment": "本地优先的密码管理器",
-        "Categories": "Utility;Security;",
-        "StartupWMClass": "AegisNext"
+        "entry": {
+          "Name": "神盾 Aegis",
+          "GenericName": "密码管理器",
+          "Comment": "本地优先的密码管理器",
+          "Categories": "Utility;Security;",
+          "StartupWMClass": "AegisNext"
+        }
       }
     },
     "deb": {
