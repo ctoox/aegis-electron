@@ -18,6 +18,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
+import { isCompositingAccelerated } from "../core/gpu";
 import * as os from "node:os";
 import { basename, join, resolve, sep } from "node:path";
 import {
@@ -126,6 +127,40 @@ function detectMaterial(): Material {
 const MATERIAL = detectMaterial();
 /** 有系统级材质时, 窗口底色必须全透明, 否则系统画的模糊会被不透明底色盖住 */
 const NATIVE_MATERIAL = MATERIAL === "vibrancy" || MATERIAL === "acrylic" || MATERIAL === "mica";
+
+/**
+ * 硬件加速能力探测。
+ *
+ * 为什么要专门探这个：浏览器在没有可用 GPU 时会退到 SwiftShader（纯 CPU 软件渲染），
+ * 玻璃需要的模糊/渐变/阴影全部按像素在 CPU 上算。表现出来不只是"卡"——
+ * 页面切换要重画一大片，CPU 一帧画不完时，合成器会先把**已经画好的分块**呈现出来
+ * （栅格顺序大致从左往右、从上往下），肉眼看着就像"整块内容先从左上角冒出来、
+ * 再慢慢铺满变大"。用户很容易把它当成布局/动画坏了，其实是没启用硬件加速。
+ *
+ * **信创机型最容易撞上这条**：兆芯/飞腾等平台的集显驱动常没装，设备管理器里
+ * 显示的是"Microsoft 基本显示适配器"，Chromium 就拿不到 GPU。
+ * 这不是把某张显卡拉黑，是系统里根本没有可用的 GPU —— 代码层面改不了，只能装驱动。
+ *
+ * 实测（2026-10-05，兆芯 KX-7000 + Microsoft 基本显示适配器）:
+ *   gpu_compositing=rasterization=disabled_software, glRenderer=SwiftShader
+ */
+function detectAcceleration(): { accelerated: boolean; status: string } {
+  // getGPUFeatureStatus 在个别平台/极端情况下会抛 —— 探测类代码不该把应用带崩
+  let status: Record<string, string> = {};
+  try {
+    status = app.getGPUFeatureStatus() as unknown as Record<string, string>;
+  } catch {
+    return { accelerated: true, status: "unknown" }; // 探不出来就不吓唬用户
+  }
+  const compositing = status.gpu_compositing ?? "unknown";
+  return {
+    // 判定规则在 src/core/gpu.ts 里, 有单测盯着 —— 别在这里手写 equals,
+    // Chromium 还会给 enabled_force / enabled_force_on, 写死会把好机器误报成没加速
+    accelerated: isCompositingAccelerated(compositing),
+    status: compositing,
+  };
+}
+
 
 /**
  * 菜单. macOS 必须要有 App/编辑菜单 —— 否则 Cmd+C/V/X/Q 这些标准快捷键
@@ -595,6 +630,9 @@ ipcMain.handle("app:info", () => ({
   node: process.versions.node,
   os: `${os.type()} ${os.release()} (${os.arch()})`,
   material: MATERIAL,
+  // 渲染加速状态: 没启用时界面要提示"装显卡驱动", 见 detectAcceleration() 的注释。
+  // 故意**现算**而不是模块加载时算一次 —— GPU 进程可能那时还没起来, 会探成 unknown。
+  gpu: detectAcceleration(),
   kdf: { ...KDF_PARAMS },
   vaultPath: vaultPath(),
   settingsPath: join(userDataDir, "aegis.settings.json"),

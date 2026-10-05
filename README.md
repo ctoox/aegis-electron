@@ -243,11 +243,12 @@ npm run ci
 # = tsc --noEmit                      类型检查
 #   scripts/check-renderer-purity.ts   渲染层零 Node API（含传递依赖链）
 #   scripts/check-package-assets.ts    打包资源齐备且已进版本库
-#   npm test                           468 项断言
+#   npm test                           484 项断言
 ```
 
-测试覆盖 9 个套件：加密核心（31）· 库操作（36）· 分享包（42）· TOTP（17）·
-健康检查（29）· HIBP 客户端（17）· 导入导出（121）· 设置（83）· 快速填充编译器（92）。
+测试覆盖 10 个套件：加密核心（31）· 库操作（36）· 分享包（42）· TOTP（17）·
+健康检查（29）· HIBP 客户端（17）· 导入导出（121）· 设置（83）· 快速填充编译器（92）·
+渲染加速判断（16）。
 
 `npm test` 碰不到"窗口能不能开起来"，所以另有一组走真实进程的脚本：
 
@@ -260,6 +261,8 @@ npm run shot:ui -- --user-data-dir "$TEMP/aegis-vis" --password visual-check-123
 node scripts/verify-autotype-native.mjs    # 真机验证自动打字：往记事本打一串中文/emoji 再读回比对
 npm run bench:render -- --user-data-dir "$TEMP/aegis-vis" --password visual-check-123
                                            # 渲染流畅度基准：滚动/hover 下的逐帧耗时
+npm run bench:switch -- --user-data-dir "$TEMP/aegis-vis" --password visual-check-123
+                                           # 切页代价基准：第一行会报"有没有硬件加速"
 ```
 
 `shot:ui` 通过 Chrome DevTools Protocol（`--remote-debugging-port`）驱动界面而不是抓窗口，
@@ -270,8 +273,19 @@ npm run bench:render -- --user-data-dir "$TEMP/aegis-vis" --password visual-chec
 2026-10 用它把玻璃模式的滚动从 **4fps 修回 60fps**（p95 250ms → 15.7ms，0 掉帧），
 过程与规则见 [`docs/RENDER-PERF.md`](docs/RENDER-PERF.md)。
 
+`bench:switch` 量的是另一件事：**整块内容换掉**（列 2–3 整片重画）要几个帧 ——
+滚动能增量刷新，切页不能。它在第一行打印硬件加速状态，因为
+**没有 GPU 时所有数字都要按「CPU 在画」来读**。
+
 > **性能红线**：不要给「背后是静态底图」的面板加 `backdrop-filter` ——
 > 它买不到观感，只按帧收费。`shot:ui` 里有护栏盯着这一条。
+>
+> **没有显卡驱动时**：Chromium 会退到 SwiftShader（纯 CPU 软件渲染），玻璃的
+> 模糊/渐变/阴影全部按像素在 CPU 上算。这时切换页面可能看到「整块内容先从左上角
+> 冒出来再铺满」—— 那是 CPU 一帧画不完、合成器先呈现已画好的分块，不是布局或
+> 动画坏了。应用检测到这种情况会在设置页「外观」下给出提示；
+> **信创机型（兆芯/飞腾等）最容易撞上这条**，装好集显驱动即可。
+> 详见 [`docs/RENDER-PERF.md`](docs/RENDER-PERF.md) 第 10 节。
 
 `verify-autotype-native.mjs` 是**唯一**需要真实桌面会话的脚本：它会开一个记事本、切到前台、
 把 `神盾Aegis·测试🚀✓—0O1l` 当作键盘输入发过去，再用 `WM_GETTEXT` 读回来逐字比对 ——

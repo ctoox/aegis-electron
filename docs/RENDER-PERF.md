@@ -132,3 +132,79 @@ npm run bench:render -- --user-data-dir <目录> --password <密码> --ablate   
 - 这三个数字都来自**固定的一台机器**（Win10 + 集显/独显未知）。macOS 的
   `vibrancy` 与 Win11 的 `acrylic`/`mica` 走系统实现，没法在本机验证 ——
   需要在真机上各跑一次 `npm run bench:render`。
+
+## 10. 没装显卡驱动时：SwiftShader 与「内容从左上角铺开」
+
+> 2026-10-05 追加。用户报「切换页面时整体会缩到左上角再变大」。
+
+**先说结论：那不是布局坏了，也不是动画坏了，是这台机器没有 GPU 加速。**
+
+### 10.1 怎么发现的
+
+浏览器级 CDP `SystemInfo.getInfo`：
+
+```
+gpu_compositing: disabled_software      rasterization: disabled_software
+opengl: disabled_off                    2d_canvas / webgl: unavailable_software
+glRenderer: ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero)), SwiftShader driver-5.0.0)
+vendor=5140(0x1414 Microsoft) device=0x008C
+```
+
+`0x008C` 是 **Microsoft Basic Render Driver** —— 没有可用显卡驱动时的兜底设备。
+后来确认本机是**联想开天 N80z G2e（信创整机）+ 兆芯 KaiXian KX-7000**，
+显卡面板显示「Microsoft 基本显示适配器」，即**没装兆芯集显驱动**（不是虚拟机，
+`Get-CimInstance Win32_VideoController` 一查就知道）。
+
+**这不是 Chromium 把某张卡拉黑了**，是系统层面没有可用的 GPU —— 代码里改不了。
+
+### 10.2 为什么表现成「从左上角铺开」
+
+没有 GPU 时所有合成/栅格都在 CPU 上跑。切页面要重画列 2–3 整块区域，
+CPU 一帧画不完，合成器会**先把已经画好的分块呈现出来**；而栅格顺序大致是从左往右、
+从上往下 —— 于是肉眼看到的就是「整块内容先从左上角冒出来，再慢慢铺满变大」。
+用户会把它理解成动画/布局坏了，其实它是**画得慢**。
+
+### 10.3 实测代价（本机，玻璃开）
+
+复现命令：`npm run bench:switch -- --user-data-dir <演示库> --password <主密码>`
+（第一行就会打印硬件加速状态；`--override '<css>'` 可做单变量消融）
+
+| 场景 | 首绘（设置页第一次打开） | 稳态中位 | 稳态最大 |
+|---|---|---|---|
+| 切页面（基线） | 250ms | 31ms | 47ms |
+| 底图加 `will-change: transform` | 266ms | 31ms | 47ms |
+| `--num-raster-threads=6` | 234ms | 31ms | 31ms |
+
+- 首绘那 250ms 是**页面自己第一次布局+绘制+栅格**；稳态只有 31ms（= 1 个掉帧）。
+- 底图提层、加栅格线程**都不动这两个数字** → 瓶颈是页面内容的绘制复杂度。
+- 逐帧几何采样 40 帧完全一致、screencast 抓了 5 种触发（切页/玻璃开关/最大化还原/
+  快速连切/切主题）共 30+ 帧**帧帧完整** → 这个现象**不在渲染进程的输出里**。
+
+> **看数量级，别看小数点。** 这台机器本身就慢、又会被别的进程抢 CPU：
+> 同一配置相邻两次跑，稳态中位能差一倍（31ms ↔ 62ms）。要比较两个方案，
+> 必须在同一台机器、同一时段、一次只改一个变量，并且**交替测**。
+
+### 10.4 我们做了什么
+
+代码层没有可抠的了（玻璃现在和「关玻璃」同价：31ms 对 31ms）。做的是**把这件事说出来**：
+
+- 主进程 `detectAcceleration()`：读 `app.getGPUFeatureStatus().gpu_compositing`，
+  `enabled`/`enabled_on` 才算启用。**故意现算**而不是模块加载时算一次 ——
+  GPU 进程那时可能还没起来，会探成 `unknown`。
+- `app:info` 带上 `gpu: { accelerated, status }`。
+- 设置页「🎨 外观」下：未启用时给一条 `.sec-hint.warn`（写明现象、原因、怎么修）；
+  「ℹ 关于」表里加一行「渲染加速 = 已启用 / 未启用（disabled_software）」。
+- 护栏进 `shot-ui.mjs`，**跟着探测结果走**而不是"必须有提示"：
+  `hintShown === !accelerated`。有硬件加速的机器上这条提示不该出现。
+
+> **信创机型普遍如此**（兆芯/飞腾等平台常缺集显驱动）—— 这正是本项目的目标平台之一，
+> 所以这条提示不是给个别人的补丁，是这类机器上的常态。
+
+### 10.5 排错时最容易走的弯路
+
+- **别急着在 CSS 里找**。几何采样证明布局没变、screencast 证明渲染进程输出是干净的
+  —— 在这两件事做完之前，所有关于"是不是某个 CSS 属性"的猜测都是浪费。
+- `Page.screencast` 的 `maxWidth/maxHeight` 是**等比缩放到框内**，不是上限。
+  把 1325×900 当成"设备像素比 1.32"是误读，源就是 1001×680、DSF=1。
+- screencast 用 PNG 编码大尺寸会**丢帧**（换 JPEG 帧数一样，说明是真没有那些帧）。
+

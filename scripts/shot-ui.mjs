@@ -539,6 +539,54 @@ async function main() {
       "底图是独立的 fixed 图层 (不是 body 的 background-attachment)",
     );
 
+    // ---- 渲染加速提示 (信创机型最容易撞上的一条) ----
+    // 没有 GPU 时 Chromium 退到 SwiftShader 纯 CPU 渲染: 玻璃的模糊/渐变/阴影全部
+    // 按像素在 CPU 上算, 切页面时一帧画不完, 合成器先呈现已画好的分块 —— 用户看到的是
+    // "整块内容先从左上角冒出来再铺满", 很容易被当成动画/布局坏了。所以界面必须说出来。
+    //
+    // 断言写成**跟着探测结果走**, 不是"必须有提示": 有硬件加速的机器上这条不该出现。
+    await waitFor(cdp, ".about-grid", 8000);
+    const gpuUi = JSON.parse(
+      String(
+        await cdp.js(`
+          return (async () => {
+            const info = await window.api.app.info();
+            const hint = [...document.querySelectorAll("p.sec-hint")].find((p) =>
+              p.textContent.includes("没有启用硬件加速"),
+            );
+            // 结构化取"关于"里那一行, 别用 innerText —— span/b 是行内元素, 会连成一行
+            const row = [...document.querySelectorAll(".about-grid > div")].find((d) =>
+              (d.querySelector("span")?.textContent ?? "").includes("渲染加速"),
+            );
+            return JSON.stringify({
+              accel: info.gpu?.accelerated,
+              status: info.gpu?.status ?? null,
+              hintShown: Boolean(hint),
+              hintWarn: hint ? hint.classList.contains("warn") : null,
+              aboutText: row ? (row.querySelector("b")?.textContent ?? "").trim() : null,
+            });
+          })();
+        `),
+      ),
+    );
+    console.log(
+      `    · 渲染加速 accelerated=${gpuUi.accel} (${gpuUi.status})；界面提示=${gpuUi.hintShown}；关于页="${gpuUi.aboutText}"`,
+    );
+    check(typeof gpuUi.accel === "boolean", `主进程报得出渲染加速状态 (status=${gpuUi.status})`);
+    // ★ 这两条必须挂在 accelKnown 上。不加的话, 旧代码里 info.gpu 是 undefined,
+    //   `hintShown === (accel === false)` 会算成 `false === false` → 恒真通过 ——
+    //   正是本项目已经踩过两次的那个坑(断言用的条件本身可能永远成立)。
+    const accelKnown = typeof gpuUi.accel === "boolean";
+    check(
+      accelKnown && gpuUi.hintShown === !gpuUi.accel,
+      `★ 未启用硬件加速才出现提示 (accelerated=${gpuUi.accel} → 提示=${gpuUi.hintShown})`,
+    );
+    check(accelKnown && (!gpuUi.hintShown || gpuUi.hintWarn === true), "提示带警示色 (.sec-hint.warn)");
+    check(
+      gpuUi.aboutText === (gpuUi.accel ? "已启用" : `未启用（${gpuUi.status}）`),
+      `★ 关于页那行与探测结果对得上 (实际 "${gpuUi.aboutText}")`,
+    );
+
     // ---- 9. 快速填充（Auto-Type）----
     //   这一组是**安全护栏**: "面板看不到密码"和"面板弹出来不会把自己的库锁掉"
     //   都属于"改坏了不会报错、只会静默变危险"的那一类, 必须由脚本盯着。

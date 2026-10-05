@@ -495,6 +495,23 @@ export function SettingsPage(props: {
         >
           <Toggle on={settings.glass} onChange={(v) => onPatch({ glass: v })} />
         </Row>
+        {/*
+          没有硬件加速时 Chromium 会退到 SwiftShader（纯 CPU 软件渲染）。
+          这条提示存在的意义：那种情况下"切页面时整块内容从左上角冒出来再铺满"
+          会被当成动画/布局坏了，实际原因是 CPU 一帧画不完（主进程 detectAcceleration()）。
+        */}
+        {info && !info.gpu.accelerated && (
+          <p className="sec-hint warn">
+            <b>这台机器没有启用硬件加速，所有画面都在用 CPU 画。</b>
+            <span>
+              显卡驱动缺失时 Chromium 会退到纯软件渲染（SwiftShader）—— 玻璃需要的模糊、渐变、
+              阴影就全部按像素在 CPU 上算。表现出来不只是卡：<b>切换页面时整块内容会先从左
+              上角冒出来、再慢慢铺满</b>（CPU 一帧画不完，合成器先把已经画好的分块呈现出来，
+              而栅格顺序大致是从左上往右下走）。装好显卡驱动 —— 信创机型是兆芯 / 飞腾的集显
+              驱动 —— 这行会变成「已启用」，玻璃和切页都会恢复正常。
+            </span>
+          </p>
+        )}
         <Row
           title="关闭窗口时最小化到托盘"
           desc="关掉后点 × 就退出应用；打开后只是收进系统托盘，点托盘图标能叫回来（退出走托盘右键菜单）"
@@ -641,6 +658,10 @@ export function SettingsPage(props: {
             <div><span>Node</span><b>{info.node}</b></div>
             <div><span>系统</span><b>{info.os}</b></div>
             <div><span>窗口材质</span><b>{info.material}</b></div>
+            <div>
+              <span>渲染加速</span>
+              <b>{info.gpu.accelerated ? "已启用" : `未启用（${info.gpu.status}）`}</b>
+            </div>
             <div><span>KDF（只读）</span><b>{info.kdf.algo}</b></div>
             <div><span>内存 / 迭代 / 并行</span><b>{info.kdf.memoryKiB} KiB · t={info.kdf.iterations} · p={info.kdf.parallelism}</b></div>
             <div className="wide"><span>加密方案</span><b>Argon2id → KEK(32B) → 包裹随机 DEK → AES-256-GCM 信封，AAD = entryId|type</b></div>

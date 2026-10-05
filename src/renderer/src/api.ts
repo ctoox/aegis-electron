@@ -53,6 +53,13 @@ export interface AppInfo {
   node: string;
   os: string;
   material: "vibrancy" | "acrylic" | "mica" | "inapp";
+  /**
+   * 渲染加速状态。`accelerated` 为假 = Chromium 在跑 SwiftShader（纯 CPU 软件渲染），
+   * 玻璃的模糊/渐变/阴影全部按像素在 CPU 上算 —— 页面切换要重画一大片，
+   * 画不完时合成器会先呈现已画好的分块，看着像"内容从左上角铺开"。
+   * 信创机型常缺集显驱动，最容易撞上。见主进程 detectAcceleration() 的注释。
+   */
+  gpu: { accelerated: boolean; status: string };
   kdf: { algo: string; memoryKiB: number; iterations: number; parallelism: number };
   vaultPath: string;
   settingsPath: string;
