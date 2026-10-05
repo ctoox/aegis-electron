@@ -16,6 +16,31 @@
   gap: 16px;
 }
 
+/* ============ 后台预热层 ============ */
+/*
+ * 见 App.tsx 里 warm 那段注释：把「设置 / 密码健康」在空闲时段渲染一遍，
+ * 好让首次挂载时的字形解析与排版缓存在用户点击之前就热好。
+ *
+ * ★ visibility: hidden —— **不能改成 display: none**。后者不建布局对象，
+ *   预热会静默失效（界面看起来完全正常，只是第一次点设置又变卡）。
+ * ★ left: 210px 是跟 .app 的 `grid-template-columns: 210px 300px 1fr` 与
+ *   `.page { grid-column: 2 / -1 }` 对齐的：文字的行盒宽度必须和真实内容区一致，
+ *   否则断行不同、预热出来的是另一批文本 run，等于白热。改侧栏宽度时记得一起改。
+ * ★ position: fixed 使其完全脱离文档流，不影响真实布局；
+ *   z-index: -1 + pointer-events: none 保证既看不见也点不到。
+ */
+.warm-layer {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: 210px;
+  right: 0;
+  overflow: hidden;
+  visibility: hidden;
+  pointer-events: none;
+  z-index: -1;
+}
+
 .page-head {
   display: flex;
   align-items: flex-start;

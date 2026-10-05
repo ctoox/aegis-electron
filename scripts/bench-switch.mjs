@@ -163,6 +163,11 @@ async function main() {
   const cdp = await Cdp.connect(page.webSocketDebuggerUrl);
   await cdp.send("Page.enable");
   await cdp.send("Runtime.enable");
+  // ★ 必须把窗口拉到前台。被遮挡/最小化时 Chromium 会节流渲染，rAF 少得可怜 ——
+  //   那种数字全是噪声（曾经整轮只抓到 34 帧 vs 正常 390 帧）。
+  //   注意: 主线程计数(LayoutDuration 等)不受节流影响, 所以哪怕帧数不对,
+  //   耗时拆解那一节仍然可信。
+  await cdp.send("Page.bringToFront");
 
   // 解锁（演示库的主密码由 --password 传入）
   for (let i = 0; i < 60; i++) {
@@ -219,25 +224,54 @@ async function main() {
     return "ok";
   `);
 
-  async function clickNav(name, phase) {
+  await cdp.send("Performance.enable");
+
+  /** 读一份主线程累计计数器（都是秒，单调递增，所以要读差值） */
+  async function readMetrics() {
+    const r = await cdp.send("Performance.getMetrics");
+    const out = {};
+    for (const { name, value } of r.metrics) out[name] = value;
+    return out;
+  }
+
+  // 每次切换同时记两份账：
+  //   页面侧 —— rAF 帧间隔（"用户看到的"）
+  //   Node 侧 —— 主线程耗时拆解（"时间花在哪"）
+  const mainMetrics = [];
+  async function clickNav(name, phase, settleMs) {
+    const before = await readMetrics();
     await cdp.js(`
       window.__sw.marks.push([Math.round(performance.now()), ${JSON.stringify(name)}, ${JSON.stringify(phase)}]);
       const nav = [...document.querySelectorAll(".nav-item")].find((e) => e.textContent.includes(${JSON.stringify(name)}));
       if (nav) nav.click();
       return "ok";
     `);
+    await sleep(settleMs);
+    const after = await readMetrics();
+    mainMetrics.push({
+      phase,
+      name,
+      script: after.ScriptDuration - before.ScriptDuration,
+      style: after.RecalcStyleDuration - before.RecalcStyleDuration,
+      layout: after.LayoutDuration - before.LayoutDuration,
+      task: after.TaskDuration - before.TaskDuration,
+      // 次数同样重要: 布局 381ms 是"一次巨大的布局"还是"几十次来回布局",
+      // 修法完全不同 —— 前者要简化 DOM, 后者要去掉强制同步布局(布局抖动)
+      layouts: after.LayoutCount - before.LayoutCount,
+      styles: after.RecalcStyleCount - before.RecalcStyleCount,
+      nodes: after.Nodes - before.Nodes,
+    });
   }
 
-  // 预热: 先把两页各点一次。"页面第一次打开"要布局 + 绘制 + 栅格 + 汉字字形缓存,
-  // 比稳态贵一个数量级 —— 单独列出来, 不混进稳态统计
-  for (const t of ["设置", "全部条目"]) {
-    await clickNav(t, "预热");
-    await sleep(900);
+  // 预热: 依次"首次打开"每一页。--visit 可以换顺序/换页面 ——
+  // 用它能一次量出**各页的首次代价**，从而区分"某一页特别重"和"共享的冷缓存"
+  // （字体/字形缓存是全局的：先开哪一页会替后面的页买单）。
+  for (const t of (arg("visit", "设置,全部条目") || "").split(",").filter(Boolean)) {
+    await clickNav(t.trim(), "预热", 900);
   }
 
   for (let r = 0; r < ROUNDS; r++) {
-    await clickNav(r % 2 === 0 ? "设置" : "全部条目", "稳态");
-    await sleep(700);
+    await clickNav(r % 2 === 0 ? "设置" : "全部条目", "稳态", 700);
   }
   await sleep(300);
 
@@ -250,6 +284,39 @@ async function main() {
   console.log(`\n== 切页期间逐帧间隔 (共 ${dt.length} 帧) ==`);
   console.log(`  中位 ${q(0.5)}ms  p95 ${q(0.95)}ms  max ${Math.max(...dt)}ms`);
   console.log(`  >33ms: ${over(33)} 帧   >50ms: ${over(50)} 帧   >100ms: ${over(100)} 帧`);
+
+  // 主线程耗时拆解 —— 这一节决定了该往哪修:
+  //   ScriptDuration 大 → React/DOM 在挂载, 修法是"别卸载页面"
+  //   Layout/RecalcStyle 大 → 样式/布局在重算, 修法是简化 DOM/CSS
+  //   三个都小但帧还是很长 → 那是栅格(合成线程), 修法是"减少绘制复杂度/面积"
+  console.log(`\n== 每次切换的主线程耗时拆解 ==`);
+  console.log(
+    `  ${"切换".padEnd(14)} ${"脚本ms".padStart(8)} ${"样式ms".padStart(8)} ${"布局ms".padStart(8)} ${"任务ms".padStart(8)} ` +
+      `${"布局次".padStart(7)} ${"样式次".padStart(7)} ${"节点增".padStart(7)}`,
+  );
+  const steadyMain = [];
+  for (const m of mainMetrics) {
+    const tag = `${m.phase === "预热" ? "[首绘]" : "[稳态]"}${m.name}`;
+    const total = m.task * 1000;
+    console.log(
+      `  ${tag.padEnd(14)} ${(m.script * 1000).toFixed(1).padStart(8)} ${(m.style * 1000).toFixed(1).padStart(8)} ` +
+        `${(m.layout * 1000).toFixed(1).padStart(8)} ${total.toFixed(1).padStart(8)} ` +
+        `${String(m.layouts).padStart(7)} ${String(m.styles).padStart(7)} ${String(m.nodes).padStart(7)}`,
+    );
+    if (m.phase !== "预热") steadyMain.push(total);
+  }
+  if (steadyMain.length) {
+    const s = [...steadyMain].sort((a, b) => a - b);
+    console.log(
+      `\n  稳态主线程任务中位 ${s[Math.floor(s.length / 2)].toFixed(1)}ms / 最大 ${s[s.length - 1].toFixed(1)}ms`,
+    );
+    console.log(
+      `  读法: 主线程只占几 ms 而帧却有几十 ms → 瓶颈在栅格/合成, 不在 React;\n` +
+        `        脚本大 → React 在卸载/重挂页面; 布局大 → 看"布局次":\n` +
+        `          次数少而耗时长 = 一次巨大的布局(要简化 DOM/CSS);\n` +
+        `          次数多 = 布局抖动(有代码在强制同步布局)`,
+    );
+  }
 
   console.log(`\n== 每次切换的"最贵一帧" ==`);
   const steady = [];

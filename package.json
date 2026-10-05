@@ -39,6 +39,7 @@
     "shot:ui": "node scripts/shot-ui.mjs",
     "bench:render": "node scripts/bench-render.mjs",
     "bench:switch": "node scripts/bench-switch.mjs",
+    "trace:mount": "node scripts/trace-mount.mjs",
     "seed:visual": "tsx scripts/seed-visual-demo.ts",
     "list:asar": "node scripts/list-asar.mjs",
     "build:native": "node scripts/build-native.mjs",

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { EntryWithStrength } from "../../core/types";
 import { analyzeLocal } from "../../core/health";
 import { FORMATS, type FormatId } from "../../core/formats";
@@ -292,6 +292,70 @@ export default function App() {
     return api.atype.onNotice((msg) => notify(msg, "info"));
   }, [notify]);
 
+  // ---- 后台预热「设置 / 密码健康」这两个覆盖页 ----
+  /*
+   * 为什么要做这件事（2026-10-05 实测，软件渲染的兆芯机器）:
+   *
+   *   设置页**首次**挂载：布局 286ms / 663 个布局对象 = 0.43ms/对象
+   *   设置页**稳态**挂载：布局  39ms / 663 个布局对象 = 0.06ms/对象   ← 快 7 倍
+   *   密码健康首次 71.5ms/156 对象、全部条目首次 5.0ms/100 对象（0.05ms/对象，正常）
+   *
+   * 也就是说：页面上的**文字第一次做字形解析与排版**要付一笔一次性成本，且成本
+   * 大致正比于布局对象数。用户第一次点「设置」看到的就是整页卡一下（最贵一帧
+   * 216~450ms）——在软件渲染下还会表现成"内容从左上角冒出来再铺满"。
+   *
+   * 这笔缓存是**进程级**的：页面卸载不会丢（稳态挂载只要 39ms 本身就是证据）。
+   * 所以在空闲时段先把它渲染一遍、再拆掉，就能把这一下从"用户点击的那一刻"
+   * 挪到"没人在看的时候"。
+   *
+   * ★ 预热层用 visibility:hidden，**不能改成 display:none** —— 后者根本不建布局
+   *   对象，预热会**静默失效**：界面看起来一切正常，只是第一次点设置又变卡。
+   * ★ 预热层渲染完必须拆掉：shot-ui.mjs 里有 `querySelectorAll("*")` 的模糊探针
+   *   和 `p.sec-hint` / `.about-grid` 的 .find() 探针，多一份隐藏副本会把它们带偏。
+   */
+  const [warm, setWarm] = useState<"idle" | "settings" | "health" | "done">("idle");
+  const idleId = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (gate !== "ready" || warm === "done") return;
+    // ★ 用户已经自己点走了（不再是条目页）就立刻收摊。否则他点「设置」的那一刻，
+    //   预热层还挂在 DOM 里 —— 那一帧要多算上预热层的事件（实测多了 157 个节点、
+    //   多一次布局），等于把"预热省下的"又还回去一部分。
+    if (view !== "vault") {
+      setWarm("done");
+      return;
+    }
+    if (!window.requestIdleCallback) {
+      setWarm("done"); // 没有空闲调度能力就不预热，别拿主线程硬赌
+      return;
+    }
+    if (warm === "idle") {
+      // 先隔一会儿，再等真正空闲 —— 别和"刚解锁那一波渲染 + 刷新"抢主线程
+      const t = window.setTimeout(() => {
+        idleId.current = window.requestIdleCallback(
+          () => setWarm("settings"),
+          { timeout: 5000 },
+        );
+      }, 600);
+      return () => {
+        window.clearTimeout(t);
+        if (idleId.current !== null) {
+          window.cancelIdleCallback(idleId.current);
+          idleId.current = null;
+        }
+      };
+    }
+    // 已经渲染了一页：让它待够一会儿（确保真的做过布局），换下一张，都做完就拆掉
+    const t = window.setTimeout(() => setWarm(warm === "settings" ? "health" : "done"), 700);
+    return () => window.clearTimeout(t);
+  }, [gate, warm, view]);
+
+  // 拆完之后留个记号。自动化测试要靠它确认"预热真的跑完了"—— 否则
+  // "预热层没留在 DOM 里"这条断言在预热压根没跑时也会通过（恒真）。
+  useEffect(() => {
+    if (warm === "done") document.body.dataset.warmup = "done";
+  }, [warm]);
+
   async function onGateDone() {
     setGate("ready");
     setView("vault");
@@ -545,6 +609,38 @@ export default function App() {
     }
   }
 
+  // 两个覆盖页的元素抽出来复用：真实位置渲染一份，后台预热层也渲染同一份。
+  // 抽成变量是为了让 props 只维护一处 —— 复制两份迟早漂移。
+  const healthPageEl = (
+    <HealthPage
+      entries={entries}
+      hibpEnabled={settings.hibpEnabled}
+      notify={notify}
+      onOpenEntry={(id) => {
+        setView("vault");
+        setSelId(id);
+        setShowPw(false);
+      }}
+    />
+  );
+
+  const settingsPageEl = (
+    <SettingsPage
+      settings={settings}
+      onPatch={patchSettings}
+      notify={notify}
+      busy={busy}
+      onImport={doImport}
+      onExport={doExport}
+      onBackup={doBackup}
+      onShareExport={doShareExport}
+      onShareImport={doShareImport}
+      onChanged={() => {
+        refresh().catch(() => {});
+      }}
+    />
+  );
+
   return (
     <div className="shell">
       {/* ===== 自绘标题栏 (macOS 用系统红黄绿圆点, 仅留拖拽区) ===== */}
@@ -695,34 +791,17 @@ export default function App() {
           </aside>
 
           {/* ===== 健康检查页 / 设置页 顶掉「列表 + 详情」两栏 ===== */}
-          {view === "health" && (
-            <HealthPage
-              entries={entries}
-              hibpEnabled={settings.hibpEnabled}
-              notify={notify}
-              onOpenEntry={(id) => {
-                setView("vault");
-                setSelId(id);
-                setShowPw(false);
-              }}
-            />
-          )}
+          {view === "health" && healthPageEl}
 
-          {view === "settings" && (
-            <SettingsPage
-              settings={settings}
-              onPatch={patchSettings}
-              notify={notify}
-              busy={busy}
-              onImport={doImport}
-              onExport={doExport}
-              onBackup={doBackup}
-              onShareExport={doShareExport}
-              onShareImport={doShareImport}
-              onChanged={() => {
-                refresh().catch(() => {});
-              }}
-            />
+          {view === "settings" && settingsPageEl}
+
+          {/* 后台预热层：只为让首次挂载时的字形解析 / 排版缓存热起来，待一会儿就拆。
+              见上面 warm 那段注释 —— 必须是 visibility:hidden，不能是 display:none。
+              只在条目页时渲染：用户一点走就收摊，免得和他的点击抢主线程。 */}
+          {(warm === "settings" || warm === "health") && view === "vault" && (
+            <div className="warm-layer" aria-hidden="true">
+              {warm === "settings" ? settingsPageEl : healthPageEl}
+            </div>
           )}
 
           {view === "vault" && (

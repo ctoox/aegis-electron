@@ -333,6 +333,18 @@ async function main() {
     await sleep(900);
     await cdp.shot(path.join(OUT, "03-vault.png"));
 
+    // ---- 3a. 后台预热层必须已经拆掉 ----
+    // App 会在空闲时把「设置 / 密码健康」离屏渲染一遍再拆掉，好让这两页的首次
+    // 挂载不用现做冷排版（实测首次布局 337ms → 50ms，见 docs/RENDER-PERF.md 第 11 节）。
+    // 这一层要是没拆掉，会**静默**污染下面所有按 class 找元素的探针 —— `.find()`
+    // 会先撞上那份隐藏副本，探针照样"能找到元素"，只是找到的是假的。
+    // ★ 必须同时断言"预热真的跑过"（body[data-warmup=done]）：否则"预热层不存在"
+    //   这条在预热压根没生效时也恒真（恒真是本仓库踩过三次的坑）。
+    const warmDone = await waitFor(cdp, "body[data-warmup='done']", 10000);
+    check(warmDone, "预热跑完并留下标记 (body[data-warmup=done])");
+    const warmLayers = Number(await cdp.js(`return document.querySelectorAll(".warm-layer").length;`));
+    check(warmLayers === 0, `★ 预热层没留在 DOM 里 (实际 ${warmLayers} 个 .warm-layer)`);
+
     // ---- 3b. 矮窗口下侧栏会不会把健康卡挤出去 ----
     console.log("\n侧栏布局（压矮视口）");
     check(

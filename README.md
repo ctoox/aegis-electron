@@ -263,6 +263,8 @@ npm run bench:render -- --user-data-dir "$TEMP/aegis-vis" --password visual-chec
                                            # 渲染流畅度基准：滚动/hover 下的逐帧耗时
 npm run bench:switch -- --user-data-dir "$TEMP/aegis-vis" --password visual-check-123
                                            # 切页代价基准：第一行会报"有没有硬件加速"
+npm run trace:mount -- --user-data-dir "$TEMP/aegis-vis" --password visual-check-123 --target 设置
+                                           # 抓"某页第一次挂载"的事件级时间线（谁在吃那几百 ms）
 ```
 
 `shot:ui` 通过 Chrome DevTools Protocol（`--remote-debugging-port`）驱动界面而不是抓窗口，
@@ -277,6 +279,12 @@ npm run bench:switch -- --user-data-dir "$TEMP/aegis-vis" --password visual-chec
 滚动能增量刷新，切页不能。它在第一行打印硬件加速状态，因为
 **没有 GPU 时所有数字都要按「CPU 在画」来读**。
 
+`trace:mount` 是 `bench:switch` 的下一层：当"某页第一次打开特别慢"时，主线程拆解只会
+告诉你"布局花了 337ms"，它则给出**是谁在布局**（`Tracing` 事件级时间线 +
+`long-animation-frame` 的脚本归因）。2026-10 靠它定位并修掉了「第一次点设置要 337ms」：
+根因是**冷排版**，改法是空闲时段**后台预热**那一页 —— 首次布局 **337ms → 50ms**。
+过程与四条"弄错就静默失效"的约束见 [`docs/RENDER-PERF.md`](docs/RENDER-PERF.md) 第 11 节。
+
 > **性能红线**：不要给「背后是静态底图」的面板加 `backdrop-filter` ——
 > 它买不到观感，只按帧收费。`shot:ui` 里有护栏盯着这一条。
 >
@@ -286,6 +294,12 @@ npm run bench:switch -- --user-data-dir "$TEMP/aegis-vis" --password visual-chec
 > 动画坏了。应用检测到这种情况会在设置页「外观」下给出提示；
 > **信创机型（兆芯/飞腾等）最容易撞上这条**，装好集显驱动即可。
 > 详见 [`docs/RENDER-PERF.md`](docs/RENDER-PERF.md) 第 10 节。
+>
+> **第一次打开「设置 / 密码健康」卡一下**：那是这一页的文字第一次做**冷排版**
+> （实测设置页首次 337ms ≈ 稳态的 9 倍，与节点数成正比、与是哪一页无关）。
+> App 会在空闲时把这两页在 `.warm-layer` 里离屏渲染一遍再拆掉，把这一下挪到没人看的时候。
+> ★ 预热层必须是 `visibility: hidden` —— 改成 `display: none` 会**静默失效**
+> （不建布局对象，界面看起来完全正常、只是又变卡）。详见第 11 节。
 
 `verify-autotype-native.mjs` 是**唯一**需要真实桌面会话的脚本：它会开一个记事本、切到前台、
 把 `神盾Aegis·测试🚀✓—0O1l` 当作键盘输入发过去，再用 `WM_GETTEXT` 读回来逐字比对 ——
