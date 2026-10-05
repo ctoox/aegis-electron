@@ -34,8 +34,13 @@ export function HealthPage(props: {
   onOpenEntry: (id: string) => void;
   notify: (text: string, kind?: ToastKind) => void;
   hibpEnabled: boolean;
+  /**
+   * keep-alive：这一页不常驻时由 App 传 true（见 App.tsx 里 mounted / warm 注释）。
+   * ★ 用 visibility 藏而不是不渲染 —— 树留在 DOM 里，切回来才不用重新排版。
+   */
+  hidden?: boolean;
 }) {
-  const { entries, onOpenEntry, notify, hibpEnabled } = props;
+  const { entries, onOpenEntry, notify, hibpEnabled, hidden = false } = props;
   // 本地体检 (无网络) 是同步纯函数, 直接算, 保证首屏立即有分数
   const local = useMemo(() => analyzeLocal(entries), [entries]);
   const [report, setReport] = useState<HealthReport | null>(null);
@@ -78,7 +83,7 @@ export function HealthPage(props: {
   const C = 2 * Math.PI * R;
 
   return (
-    <main className="page health-page">
+    <main className={`page health-page${hidden ? " view-off" : ""}`}>
       <header className="page-head">
         <div>
           <h1>密码健康</h1>

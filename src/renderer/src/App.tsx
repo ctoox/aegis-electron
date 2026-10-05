@@ -292,35 +292,58 @@ export default function App() {
     return api.atype.onNotice((msg) => notify(msg, "info"));
   }, [notify]);
 
-  // ---- 后台预热「设置 / 密码健康」这两个覆盖页 ----
+  // ---- keep-alive：三棵视图树常驻，切视图只切 visible ----
   /*
-   * 为什么要做这件事（2026-10-05 实测，软件渲染的兆芯机器）:
+   * 这里解决的是**两笔不同的代价**，别把它们混在一起：
    *
-   *   设置页**首次**挂载：布局 286ms / 663 个布局对象 = 0.43ms/对象
-   *   设置页**稳态**挂载：布局  39ms / 663 个布局对象 = 0.06ms/对象   ← 快 7 倍
-   *   密码健康首次 71.5ms/156 对象、全部条目首次 5.0ms/100 对象（0.05ms/对象，正常）
+   * ① 首次挂载的「冷排版」（2026-10-05 实测，兆芯机器 + 软件渲染）
+   *      设置页**首次**挂载：布局 286ms / 663 个布局对象 = 0.43ms/对象
+   *      设置页**稳态**挂载：布局  39ms / 663 个布局对象 = 0.06ms/对象   ← 快 7 倍
+   *    页面上的文字第一次做字形解析与排版要付一笔一次性成本，大小正比于布局对象数。
+   *    用户第一次点「设置」看到的就是整页卡一下（最贵一帧 216~450ms）——软件渲染下
+   *    还会表现成"内容从左上角冒出来再铺满"。这笔缓存是**进程级**的，所以
+   *    **在空闲时段先把它挂上**，就能把这一下从"用户点击的那一刻"挪到"没人在看的时候"。
    *
-   * 也就是说：页面上的**文字第一次做字形解析与排版**要付一笔一次性成本，且成本
-   * 大致正比于布局对象数。用户第一次点「设置」看到的就是整页卡一下（最贵一帧
-   * 216~450ms）——在软件渲染下还会表现成"内容从左上角冒出来再铺满"。
+   * ② 每次切页的「重新排版」（同上实测；装了显卡驱动之后**依然存在**）
+   *      切到设置页的稳态仍是 33~35ms 一帧，主线程拆解几乎全是布局（663 × 0.05ms）。
+   *    这笔钱是**每次重新挂载都要重付**的 —— 卸载会把布局对象全拆掉，挂回来就重建。
+   *    所以只要不卸载就不用付：`visibility` 只影响绘制，切回来不碰布局。
    *
-   * 这笔缓存是**进程级**的：页面卸载不会丢（稳态挂载只要 39ms 本身就是证据）。
-   * 所以在空闲时段先把它渲染一遍、再拆掉，就能把这一下从"用户点击的那一刻"
-   * 挪到"没人在看的时候"。
-   *
-   * ★ 预热层用 visibility:hidden，**不能改成 display:none** —— 后者根本不建布局
-   *   对象，预热会**静默失效**：界面看起来一切正常，只是第一次点设置又变卡。
-   * ★ 预热层渲染完必须拆掉：shot-ui.mjs 里有 `querySelectorAll("*")` 的模糊探针
-   *   和 `p.sec-hint` / `.about-grid` 的 .find() 探针，多一份隐藏副本会把它们带偏。
+   * 做法：三棵树都留在 `.app` 里，靠给面板加/去 `.view-off` 类（visibility）决定谁可见。
+   * ★ 必须用 visibility，**不能改成 display:none** —— 后者把子树从布局树里摘掉，
+   *   切回来要重新排版，②那笔钱原封不动又付一遍；而且①的预排版也会**静默失效**
+   *   （界面看起来一切正常，只是第一次点设置又变卡）。
+   * ★ 类名直接挂在面板自己身上，**不要**改成 `.app[data-view=...]` 那样的后代选择器。
+   *   两种写法性能实测一样（样式重算 13.0 vs 14.2ms，在噪声内），选类名是因为
+   *   "哪个面板是关的"只写在 App 一处；后代选择器要把视图↔面板的对应关系抄进 CSS，
+   *   加一个视图就得改选择器列表，漏一条就是"两个视图同时可见"（红测验过这条路）。
+   * ★ 代价是**有代价的**：DOM 大了 3 倍，visibility 又是继承属性，所以每切一次视图
+   *   样式重算要覆盖三棵树（6~14ms，实测比不常驻时多 ~6ms）。它换掉的是布局那一笔
+   *   （36 → 10ms），两笔基本抵掉 —— 见 docs/RENDER-PERF.md 第 15 节的四轮对照。
+   * ★ 隐藏的树**仍然参与布局**，所以 `.sidebar/.listbar/.detail/.page` 必须显式钉在
+   *   `grid-row: 1`（见 styles.css 那段注释）—— 否则自动放置会把两栏挤到第 2 行。
+   * ★ 代价：隐藏副本也在 DOM 里，`shot-ui.mjs` 里按 class / 文字找元素的探针会找到
+   *   **假元素**。那批探针已全部收紧成"只认真的看得见的那个"，另有一条专门的护栏
+   *   盯着"两个视图不会同时可见"。
    */
   const [warm, setWarm] = useState<"idle" | "settings" | "health" | "done">("idle");
   const idleId = useRef<number | null>(null);
 
+  // 访问过的视图树都留着。vault 是一解锁就在的，所以从它开始。
+  const [mounted, setMounted] = useState<ReadonlySet<View>>(() => new Set<View>(["vault"]));
+  const mount = useCallback((v: View) => {
+    setMounted((prev) => (prev.has(v) ? prev : new Set([...prev, v])));
+  }, []);
+
+  // 用户自己点走的路径：切到哪个视图，它就必须已经挂着
+  useEffect(() => {
+    mount(view);
+  }, [view, mount]);
+
   useEffect(() => {
     if (gate !== "ready" || warm === "done") return;
     // ★ 用户已经自己点走了（不再是条目页）就立刻收摊。否则他点「设置」的那一刻，
-    //   预热层还挂在 DOM 里 —— 那一帧要多算上预热层的事件（实测多了 157 个节点、
-    //   多一次布局），等于把"预热省下的"又还回去一部分。
+    //   预热还在抢主线程 —— 等于把"预热省下的"又还回去一部分。
     if (view !== "vault") {
       setWarm("done");
       return;
@@ -345,13 +368,18 @@ export default function App() {
         }
       };
     }
-    // 已经渲染了一页：让它待够一会儿（确保真的做过布局），换下一张，都做完就拆掉
+    // 已经挂上一页了：让它待够一会儿（确保真的做过布局），再挂下一张
     const t = window.setTimeout(() => setWarm(warm === "settings" ? "health" : "done"), 700);
     return () => window.clearTimeout(t);
   }, [gate, warm, view]);
 
-  // 拆完之后留个记号。自动化测试要靠它确认"预热真的跑完了"—— 否则
-  // "预热层没留在 DOM 里"这条断言在预热压根没跑时也会通过（恒真）。
+  // 预热 = 提前**挂载**（而不是渲染到离屏层再拆掉）
+  useEffect(() => {
+    if (warm === "settings" || warm === "health") mount(warm);
+  }, [warm, mount]);
+
+  // 序列跑完留个记号。自动化测试靠它确认"预热真的跑完了"—— 否则
+  // "两个覆盖页已经提前挂好"这条断言在预热压根没跑时也会通过（恒真）。
   useEffect(() => {
     if (warm === "done") document.body.dataset.warmup = "done";
   }, [warm]);
@@ -616,6 +644,7 @@ export default function App() {
       entries={entries}
       hibpEnabled={settings.hibpEnabled}
       notify={notify}
+      hidden={view !== "health"}
       onOpenEntry={(id) => {
         setView("vault");
         setSelId(id);
@@ -630,6 +659,7 @@ export default function App() {
       onPatch={patchSettings}
       notify={notify}
       busy={busy}
+      hidden={view !== "settings"}
       onImport={doImport}
       onExport={doExport}
       onBackup={doBackup}
@@ -688,7 +718,7 @@ export default function App() {
       )}
 
       {gate === "ready" && (
-        <div className="app">
+        <div className="app" data-view={view}>
           {/* ===== 侧栏 ===== */}
           <aside className="sidebar">
             <div className="brand">
@@ -790,24 +820,17 @@ export default function App() {
             </div>
           </aside>
 
-          {/* ===== 健康检查页 / 设置页 顶掉「列表 + 详情」两栏 ===== */}
-          {view === "health" && healthPageEl}
+          {/* ===== 健康检查页 / 设置页 顶掉「列表 + 详情」两栏 =====
+              常驻渲染（keep-alive）：这里只管"挂没挂过"，谁**可见**由
+              `.app[data-view=...]` 那组 CSS 规则决定。见上面 mounted / warm 注释。 */}
+          {mounted.has("health") && healthPageEl}
 
-          {view === "settings" && settingsPageEl}
+          {mounted.has("settings") && settingsPageEl}
 
-          {/* 后台预热层：只为让首次挂载时的字形解析 / 排版缓存热起来，待一会儿就拆。
-              见上面 warm 那段注释 —— 必须是 visibility:hidden，不能是 display:none。
-              只在条目页时渲染：用户一点走就收摊，免得和他的点击抢主线程。 */}
-          {(warm === "settings" || warm === "health") && view === "vault" && (
-            <div className="warm-layer" aria-hidden="true">
-              {warm === "settings" ? settingsPageEl : healthPageEl}
-            </div>
-          )}
-
-          {view === "vault" && (
-            <>
+          {/* ===== 条目页：列表 + 详情（同样是常驻的） ===== */}
+          <>
               {/* ===== 条目列表 ===== */}
-              <section className="listbar">
+              <section className={`listbar${view !== "vault" ? " view-off" : ""}`}>
                 <div className="search">
                   <span>🔍</span>
                   <input placeholder="搜索条目" value={query}
@@ -911,7 +934,7 @@ export default function App() {
               </section>
 
               {/* ===== 详情 ===== */}
-              <main className="detail">
+              <main className={`detail${view !== "vault" ? " view-off" : ""}`}>
                 {sel ? (
                   <div className="detail-card fade-in" key={sel.id}>
                     <div className="head">
@@ -1032,8 +1055,7 @@ export default function App() {
                   </div>
                 )}
               </main>
-            </>
-          )}
+          </>
         </div>
       )}
 

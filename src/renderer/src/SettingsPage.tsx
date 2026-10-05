@@ -148,10 +148,15 @@ export function SettingsPage(props: {
   /** 库内容被本页改动了 (清空 / 恢复快照) → 让上层刷新条目列表 */
   onChanged: () => void;
   busy: boolean;
+  /**
+   * keep-alive：这一页不常驻时由 App 传 true（见 App.tsx 里 mounted / warm 注释）。
+   * ★ 用 visibility 藏而不是不渲染 —— 树留在 DOM 里，切回来才不用重新排版。
+   */
+  hidden?: boolean;
 }) {
   const {
     settings, onPatch, notify, onImport, onExport, onBackup,
-    onShareExport, onShareImport, onChanged, busy,
+    onShareExport, onShareImport, onChanged, busy, hidden = false,
   } = props;
   const [info, setInfo] = useState<AppInfo | null>(null);
   const [exportFormat, setExportFormat] = useState<FormatId>("aegis-json");
@@ -243,7 +248,7 @@ export function SettingsPage(props: {
   const exportable = FORMATS.filter((f) => f.dir !== "in");
 
   return (
-    <main className="page settings-page">
+    <main className={`page settings-page${hidden ? " view-off" : ""}`}>
       <header className="page-head">
         <div>
           <h1>设置</h1>

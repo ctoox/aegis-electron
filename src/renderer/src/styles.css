@@ -54,7 +54,54 @@ button {
 .app {
   display: grid;
   grid-template-columns: 210px 300px 1fr;
+  /*
+   * ★ 行高必须钉死，**不能留给 auto**（默认就是 auto，加这行是在防回归）。
+   *
+   * auto 行高由内容决定 → 列表里筛选一下（打字搜索）就会改变行高 → 网格重新布轨
+   * → **同一格里的其它面板跟着全部重新排版**。keep-alive 之后同格里住着三棵树，
+   * 于是打一个字要多付一次几百个布局对象的账：实测每字布局 0.75ms → 9.36ms，
+   * 每字总任务 5.28ms → 18.16ms，**直接越过 60Hz 的 16.7ms 帧预算**（打字掉帧）。
+   * 钉成 minmax(0, 1fr) 之后行高只由容器高度决定，与内容无关，这个传播就断了。
+   * minmax(0, ...) 的 0 是必须的：`1fr` 等价于 `minmax(auto, 1fr)`，而 auto 最小值
+   * 会按内容算，内容一高又要把行撑起来（等于没钉）。
+   *
+   * 数据与完整推导见 docs/RENDER-PERF.md 第 15 节。
+   */
+  grid-template-rows: minmax(0, 1fr);
   height: 100vh;
+}
+
+/*
+ * ★ 四块面板**全部显式放置**到第 1 行。这是 keep-alive 的前提，别改回自动放置。
+ *
+ * keep-alive 让「条目页」「密码健康」「设置」三棵树同时留在 DOM 里，只有当前视图
+ * 可见，其余用 visibility:hidden 藏起来（见 App.tsx 里 mounted / warm 那段注释）。
+ *
+ * 为什么非显式不可 —— 实测数据（docs/RENDER-PERF.md 第 15 节，脚本 .visual/_geom.mjs）：
+ *   `.listbar` / `.detail` 原本靠 grid **自动放置**落到第 2、3 列，而 `.page` 是显式的
+ *   `grid-column: 2 / -1`。一旦 `.page` 常驻（哪怕 visibility:hidden，它**照样参与布局**），
+ *   自动放置就会把 `.listbar` / `.detail` 挤到**第 2 行**去：
+ *       grid-template-rows  642px  →  427px 214px     ← 两栏高度腰斩
+ *       .listbar 高度       642px  →  427px
+ *   四者都钉死 grid-row:1 之后，显式占位允许重叠，几何与"只有一棵树"时**逐像素一致**：
+ *       .listbar 210,38,300,642    rows 642px    （与基线完全相同）
+ *
+ * 注：`.page` 的内容虽高（实测 3567px），但带 `overflow-y:auto` + `min-height:0` 的
+ * 滚动容器对网格行高的**贡献是 0**，所以隐藏副本不会把行撑高 —— 出问题的只有放置。
+ */
+.sidebar {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.listbar {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.detail {
+  grid-column: 3;
+  grid-row: 1;
 }
 
 /* ============ 侧栏 ============ */

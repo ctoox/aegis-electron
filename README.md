@@ -314,9 +314,15 @@ npm run trace:mount -- --user-data-dir "$TEMP/aegis-vis" --password visual-check
 >
 > **第一次打开「设置 / 密码健康」卡一下**：那是这一页的文字第一次做**冷排版**
 > （实测设置页首次 337ms ≈ 稳态的 9 倍，与节点数成正比、与是哪一页无关）。
-> App 会在空闲时把这两页在 `.warm-layer` 里离屏渲染一遍再拆掉，把这一下挪到没人看的时候。
-> ★ 预热层必须是 `visibility: hidden` —— 改成 `display: none` 会**静默失效**
-> （不建布局对象，界面看起来完全正常、只是又变卡）。详见第 11 节。
+> App 把这三页做成**常驻树**（keep-alive）：空闲时提前挂上、平时用 `visibility` 藏着，
+> 切页只翻 `visibility` 不卸载 —— 既把冷排版挪到没人看的时候，也省掉每次切页
+> 663 个布局对象的重建（实测布局 38ms → 2.1ms）。
+> ★ 藏起来必须用 `visibility` —— 改成 `display: none` 会把子树从布局树里摘掉，
+>   切回来要重新排版，**静默**回到原点（界面看起来完全正常）。
+> ★ 代价是另外两笔，都在第 15 节量化过：样式重算 +6ms，以及"隐藏树常驻拖慢打字"
+>   —— 后者第一版真的把打字拖慢 3.4 倍（18.16ms/字，越过帧预算），
+>   靠 `grid-template-rows: minmax(0, 1fr)` 才拉回 8.45ms/字。
+>   详见 [`docs/RENDER-PERF.md`](docs/RENDER-PERF.md) 第 15 节。
 
 `verify-autotype-native.mjs` 是**唯一**需要真实桌面会话的脚本：它会开一个记事本、切到前台、
 把 `神盾Aegis·测试🚀✓—0O1l` 当作键盘输入发过去，再用 `WM_GETTEXT` 读回来逐字比对 ——

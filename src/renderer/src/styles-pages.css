@@ -8,6 +8,9 @@
 /* ============ 页面容器: 顶掉「列表 + 详情」两栏 ============ */
 .page {
   grid-column: 2 / -1;
+  /* ★ keep-alive: 必须与 .listbar / .detail 同钉在第 1 行（显式占位才允许重叠）。
+     漏掉这行 → 自动放置会把两栏挤到第 2 行，几何被改变。见 styles.css 那段注释。 */
+  grid-row: 1;
   min-height: 0;
   overflow-y: auto;
   padding: 20px 26px 30px;
@@ -16,29 +19,22 @@
   gap: 16px;
 }
 
-/* ============ 后台预热层 ============ */
+/* ============ keep-alive: 非当前视图的面板只藏起来, 不从 DOM 里摘掉 ============ */
 /*
- * 见 App.tsx 里 warm 那段注释：把「设置 / 密码健康」在空闲时段渲染一遍，
- * 好让首次挂载时的字形解析与排版缓存在用户点击之前就热好。
+ * 见 App.tsx 里 mounted / warm 那段注释。切视图 = 给四块面板换 `.view-off` 类。
  *
- * ★ visibility: hidden —— **不能改成 display: none**。后者不建布局对象，
- *   预热会静默失效（界面看起来完全正常，只是第一次点设置又变卡）。
- * ★ left: 210px 是跟 .app 的 `grid-template-columns: 210px 300px 1fr` 与
- *   `.page { grid-column: 2 / -1 }` 对齐的：文字的行盒宽度必须和真实内容区一致，
- *   否则断行不同、预热出来的是另一批文本 run，等于白热。改侧栏宽度时记得一起改。
- * ★ position: fixed 使其完全脱离文档流，不影响真实布局；
- *   z-index: -1 + pointer-events: none 保证既看不见也点不到。
+ * ★ 用 visibility 而不是 display:none。display:none 会把整棵子树从布局树里摘掉，
+ *   切回来要**重新排版**（本机 663 个布局对象 ≈ 36ms，正是我们要省掉的那笔）；
+ *   visibility 只影响绘制，切回来完全不碰布局。
+ * ★ 隐藏的树**仍然参与布局**，所以四块面板必须显式钉在第 1 行 —— 见 styles.css。
+ * ★ 隐藏的树不接收指针事件、不可聚焦、也不进无障碍树（visibility 的固有语义），
+ *   所以不需要额外的 inert / pointer-events:none。
+ * ★ 类名是**直接挂在面板自己身上**的，而不是 `.app[data-view=...]` 那样的后代选择器。
+ *   两种写法性能实测一样（样式重算 13.0 vs 14.2ms，在噪声内）；选类名是因为
+ *   "哪个面板是关的"只写在 App.tsx 一处，加视图不用改 CSS。详见 docs/RENDER-PERF.md 第 15 节。
  */
-.warm-layer {
-  position: fixed;
-  top: 0;
-  bottom: 0;
-  left: 210px;
-  right: 0;
-  overflow: hidden;
+.view-off {
   visibility: hidden;
-  pointer-events: none;
-  z-index: -1;
 }
 
 .page-head {

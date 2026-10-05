@@ -212,6 +212,41 @@ async function waitFor(cdp, sel, timeoutMs = 8000) {
 }
 
 /**
+ * 「只找真的看得见的那个」—— 拼进 cdp.js 的代码里用：
+ *     cdp.js(` ${VIS} const page = qv(".settings-page"); ... `)
+ *
+ * ★ 为什么必须有它：keep-alive 之后（见 App.tsx 里 mounted / warm 那段注释），
+ *   非当前视图的面板**仍然留在 DOM 里**，只是 visibility:hidden。于是
+ *   `document.querySelector` / `.find()` 会先撞上那份隐藏副本 —— 探针照样
+ *   "找得到元素"，只是找到的是**假的**。这和当初 `.warm-layer` 是同一个坑，
+ *   区别在于它从"临时渲染再拆掉"变成了"常驻"。
+ * ★ 用 checkVisibility 而不是只比 `visibility !== "hidden"`：它连 display:none /
+ *   content-visibility 一起算，将来谁把隐藏方式换成别的，探针也不会静默失效。
+ */
+const VIS = `
+  const vis = (e) => Boolean(e) && (e.checkVisibility
+    ? e.checkVisibility({ visibilityProperty: true, contentVisibilityAuto: true })
+    : getComputedStyle(e).visibility !== "hidden" && getComputedStyle(e).display !== "none");
+  const qv = (sel, root) => [...(root || document).querySelectorAll(sel)].find(vis);
+`;
+
+/** 等某个选择器**可见地**出现（不是"存在于 DOM 里"就算数） */
+async function waitForVisible(cdp, sel, timeoutMs = 8000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    // eslint-disable-next-line no-await-in-loop
+    const ok = await cdp.js(`
+      ${VIS}
+      return Boolean(qv(${JSON.stringify(sel)}));
+    `);
+    if (ok) return true;
+    // eslint-disable-next-line no-await-in-loop
+    await sleep(200);
+  }
+  return false;
+}
+
+/**
  * 把弹窗滚到底, 检查带某段文字的按钮能不能被真正看到。
  * 返回 true/false. 高弹窗(比视口高)全靠遮罩层滚动, 按钮够不到就是 bug。
  */
@@ -333,17 +368,79 @@ async function main() {
     await sleep(900);
     await cdp.shot(path.join(OUT, "03-vault.png"));
 
-    // ---- 3a. 后台预热层必须已经拆掉 ----
-    // App 会在空闲时把「设置 / 密码健康」离屏渲染一遍再拆掉，好让这两页的首次
-    // 挂载不用现做冷排版（实测首次布局 337ms → 50ms，见 docs/RENDER-PERF.md 第 11 节）。
-    // 这一层要是没拆掉，会**静默**污染下面所有按 class 找元素的探针 —— `.find()`
-    // 会先撞上那份隐藏副本，探针照样"能找到元素"，只是找到的是假的。
-    // ★ 必须同时断言"预热真的跑过"（body[data-warmup=done]）：否则"预热层不存在"
-    //   这条在预热压根没生效时也恒真（恒真是本仓库踩过三次的坑）。
+    // ---- 3a. keep-alive：三棵视图树常驻，只有当前视图可见 ----
+    // 机制（见 App.tsx 里 mounted / warm 那段注释）：App 把「条目页 / 密码健康 / 设置」
+    // 三棵树都留在 `.app` 里，切换视图只换 `.app[data-view]`，靠 CSS 的 visibility
+    // 决定谁可见 —— 这样切页不用重新排版（本机 663 个布局对象 ≈ 36ms）。
+    // 空闲时段仍然是"提前把两页挂上"，只是从"渲染到离屏层再拆掉"改成了"直接挂上并藏着"。
+    //
+    // ★ 这一段同时是**下面所有探针的预置条件**。隐藏副本也在 DOM 里，普通
+    //   querySelector 会先撞上它。所以必须先把"只有当前视图可见"钉死，
+    //   后面那些按 class / 文字找元素的探针（已全部改用 qv/waitForVisible）才可信。
+    // ★ 原来这里断言的是"预热层没留在 DOM 里"（`.warm-layer` 计数为 0）。那个类已经
+    //   从代码里删掉了，再留着就是一条**恒真**的探针（本仓库的已知坑：永远绿的探针
+    //   比没有探针更糟）。它要防的事情还在 —— 只是换成了下面这三条来防。
     const warmDone = await waitFor(cdp, "body[data-warmup='done']", 10000);
-    check(warmDone, "预热跑完并留下标记 (body[data-warmup=done])");
-    const warmLayers = Number(await cdp.js(`return document.querySelectorAll(".warm-layer").length;`));
-    check(warmLayers === 0, `★ 预热层没留在 DOM 里 (实际 ${warmLayers} 个 .warm-layer)`);
+    check(warmDone, "预热序列跑完并留下标记 (body[data-warmup=done])");
+
+    const ka = JSON.parse(
+      String(
+        await cdp.js(`
+          ${VIS}
+          const state = (sel) => {
+            const el = document.querySelector(sel);
+            if (!el) return "absent";
+            return vis(el) ? "shown" : "hidden";
+          };
+          const panels = [".listbar", ".detail", ".health-page", ".settings-page"];
+          return JSON.stringify({
+            states: panels.map(state),
+            shown: panels.filter((s) => state(s) === "shown"),
+            view: document.querySelector(".app")?.dataset.view ?? null,
+          });
+        `),
+      ),
+    );
+    console.log(`    · 四块面板 = ${ka.states.join(" / ")}   （data-view=${ka.view}）`);
+
+    // (1) 三棵树都得在 —— 不在就等于 keep-alive 没生效，切页要重新排版
+    check(
+      ka.states.every((s) => s !== "absent"),
+      "★ 三棵视图树都常驻在 DOM 里（keep-alive 生效：切页不再重新排版）",
+    );
+    // (2) 当前视图下只有它自己那套可见。两个视图同时可见 = CSS 规则写漏了，
+    //     用户会看到两层内容叠在一起 —— 这种坏法不会报错，只会"看起来怪"。
+    check(
+      ka.shown.slice().sort().join("+") === ".detail+.listbar",
+      `★ 条目页视图下只有列表+详情可见（实际 ${ka.shown.join("+") || "无"}）`,
+    );
+    check(ka.view === "vault", `★ .app[data-view] 与实际视图一致（实际 ${ka.view}）`);
+    // (3) 隐藏的常驻树绝不能吃掉 Tab 焦点。这是 keep-alive 引入的新失败模式：
+    //     树还在，浏览器却不该把它算进焦点顺序。visibility:hidden 本来就该挡住，
+    //     但"该挡住"和"挡住了"是两件事 —— 所以正反两面都测。
+    //     ★ 反面必须带**正面对照组**：不然"聚焦不了"在"根本没有这个元素"时也成立。
+    const focusProbe = JSON.parse(
+      String(
+        await cdp.js(`
+          const tryFocus = (sel) => {
+            const el = document.querySelector(sel);
+            if (!el) return "absent";
+            const back = document.activeElement;
+            el.focus();
+            const took = document.activeElement === el;
+            if (back && back.focus) back.focus();
+            return took;
+          };
+          return JSON.stringify({
+            hidden: tryFocus(".settings-page .sselect"),
+            visible: tryFocus(".listbar .search input"),
+          });
+        `),
+      ),
+    );
+    console.log(`    · 聚焦探针: 可见控件=${focusProbe.visible}  隐藏控件=${focusProbe.hidden}`);
+    check(focusProbe.visible === true, "★ 预置条件: 可见页里的控件确实能拿到焦点（否则下面那条恒真）");
+    check(focusProbe.hidden === false, "★ 隐藏的常驻树不会吃掉 Tab 焦点");
 
     // ---- 3b. 矮窗口下侧栏会不会把健康卡挤出去 ----
     console.log("\n侧栏布局（压矮视口）");
@@ -409,8 +506,11 @@ async function main() {
     console.log("\n设置页");
     const r5 = await cdp.js(clickText("设置", ".nav-item"));
     check(r5.startsWith("ok"), `点了「设置」(${r5})`);
-    const gotSettings = await waitFor(cdp, ".settings-page");
-    check(gotSettings, "设置页已渲染");
+    // ★ 必须是**可见**的设置页。keep-alive 之后 .settings-page 在空闲预热阶段就已经
+    //   挂进 DOM 了，原来那句 waitFor(".settings-page") 会在"点击压根没生效"的版本上
+    //   照样通过 —— 又是一条恒真的探针。
+    const gotSettings = await waitForVisible(cdp, ".settings-page");
+    check(gotSettings, "设置页已渲染并可见");
     await sleep(800);
     await cdp.shot(path.join(OUT, "07-settings.png"), { full: true });
 
@@ -449,10 +549,16 @@ async function main() {
     //      上面两个弹窗步骤已经各自验过了) ----
     console.log("\n设置页新增样式类");
     const cls = await cdp.js(`
+      ${VIS}
       // sec-hint / at-hotkey / at-flag 是「⌨ 快速填充」那一节的 ——
       // 光看 settings-page 渲染出来不算数, 得确认那一节真的进了 DOM。
+      // ★ 限定在**可见的**那一份 .settings-page 里找: keep-alive 之后隐藏副本也在
+      //   DOM 里, 用 documentElement.outerHTML 去 includes 的话, 即使点击没生效
+      //   （设置页只是被预热挂上、还藏着）也照样为真。
+      const page = qv(".settings-page");
+      if (!page) return "NO-VISIBLE-SETTINGS-PAGE";
       const want = ["sec-divider", "snap-list", "snap-act", "btn-danger", "sec-hint", "at-hotkey", "at-flag"];
-      const html = document.documentElement.outerHTML;
+      const html = page.outerHTML;
       return want.map((c) => c + "=" + html.includes(c)).join(" ");
     `);
     console.log(`  ${cls}`);
@@ -471,15 +577,22 @@ async function main() {
     const clipUi = JSON.parse(
       String(
         await cdp.js(`
-          const sel = [...document.querySelectorAll("select")].find((s) =>
+          ${VIS}
+          // ★ 全部限定在**可见的**设置页里找。keep-alive 之后另一棵树常驻在 DOM 里，
+          //   全局 querySelectorAll / document.body.innerText 都可能命中它
+          //   （innerText 会不会跳过 visibility:hidden 属实现细节，不要依赖）。
+          const page = qv(".settings-page");
+          if (!page) return JSON.stringify({ selFound: false, noVisiblePage: true });
+          const sel = [...page.querySelectorAll("select")].find((s) =>
             [...s.options].some((o) => o.textContent === "不清空"),
           );
-          const hintEl = [...document.querySelectorAll("p.sec-hint")].find((p) =>
+          const hintEl = [...page.querySelectorAll("p.sec-hint")].find((p) =>
             p.textContent.includes("会被同步到另一台机器"),
           );
-          const txt = document.body.innerText;
+          const txt = page.innerText;
           return JSON.stringify({
             selFound: Boolean(sel),
+            noVisiblePage: false,
             opts: [...(sel ? sel.options : [])].map((o) => o.textContent),
             value: sel ? sel.value : null,
             label: sel && sel.selectedIndex >= 0 ? sel.options[sel.selectedIndex].textContent : null,
@@ -557,20 +670,25 @@ async function main() {
     // "整块内容先从左上角冒出来再铺满", 很容易被当成动画/布局坏了。所以界面必须说出来。
     //
     // 断言写成**跟着探测结果走**, 不是"必须有提示": 有硬件加速的机器上这条不该出现。
-    await waitFor(cdp, ".about-grid", 8000);
+    await waitForVisible(cdp, ".about-grid", 8000);
     const gpuUi = JSON.parse(
       String(
         await cdp.js(`
           return (async () => {
+            ${VIS}
             const info = await window.api.app.info();
-            const hint = [...document.querySelectorAll("p.sec-hint")].find((p) =>
+            // ★ 限定在可见的设置页里找 —— keep-alive 之后隐藏副本也在 DOM 里
+            const page = qv(".settings-page");
+            if (!page) return JSON.stringify({ noVisiblePage: true });
+            const hint = [...page.querySelectorAll("p.sec-hint")].find((p) =>
               p.textContent.includes("没有启用硬件加速"),
             );
             // 结构化取"关于"里那一行, 别用 innerText —— span/b 是行内元素, 会连成一行
-            const row = [...document.querySelectorAll(".about-grid > div")].find((d) =>
+            const row = [...page.querySelectorAll(".about-grid > div")].find((d) =>
               (d.querySelector("span")?.textContent ?? "").includes("渲染加速"),
             );
             return JSON.stringify({
+              noVisiblePage: false,
               accel: info.gpu?.accelerated,
               status: info.gpu?.status ?? null,
               hintShown: Boolean(hint),
