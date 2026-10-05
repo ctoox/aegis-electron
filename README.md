@@ -275,6 +275,12 @@ npm run trace:mount -- --user-data-dir "$TEMP/aegis-vis" --password visual-check
 2026-10 用它把玻璃模式的滚动从 **4fps 修回 60fps**（p95 250ms → 15.7ms，0 掉帧），
 过程与规则见 [`docs/RENDER-PERF.md`](docs/RENDER-PERF.md)。
 
+> **判据跟着刷新率走，不写死 60Hz**：两个 bench 脚本都会先**实测**渲染节奏
+> （空闲采样 rAF 取帧间隔中位），再据此算"掉 1 帧是多少 ms"。
+> 60Hz 下是 33ms，90Hz 只有 22ms，160Hz 只有 12.5ms —— 写死会把高刷机器上的
+> 掉帧误判成没掉。报告头会打印实测值；窗口被遮挡（rAF 被节流）时判"探测失败"
+> 并退回 60Hz。见 [`docs/RENDER-PERF.md`](docs/RENDER-PERF.md) 第 14 节。
+
 `bench:switch` 量的是另一件事：**整块内容换掉**（列 2–3 整片重画）要几个帧 ——
 滚动能增量刷新，切页不能。它在第一行打印硬件加速状态，因为
 **没有 GPU 时所有数字都要按「CPU 在画」来读**；`--override '<css>'` 可以做单变量消融，

@@ -14,14 +14,26 @@
  * 用法:
  *   node scripts/bench-render.mjs --user-data-dir <目录> --password <主密码> [--rounds 3]
  *
+ * ★ 判据（"多少 ms 算掉帧"）**跟着实测刷新率走**，不写死 60Hz ——
+ *   高刷机器上"掉 1 帧"的门槛比 60Hz 低得多，写死会把掉帧误判成没掉。
+ *   见 scripts/lib/refresh.mjs。
+ *
  * ⚠ 窗口必须真的可见(不能最小化) —— 被遮挡时 Chromium 会节流渲染,
  *   两边同样被节流的话, 数字就全是噪声。脚本会先把窗口拉到前台。
  */
 import { spawn } from "node:child_process";
 import * as path from "node:path";
 import * as url from "node:url";
+import { FALLBACK_VSYNC_MS, detectRefresh, describeRefresh, drop1Ms, drop2Ms } from "./lib/refresh.mjs";
 
 const ROOT = path.resolve(path.dirname(url.fileURLToPath(import.meta.url)), "..");
+
+/**
+ * 判据基准（ms）。**不写死 60Hz** —— 运行时由 detectRefresh() 探测后覆盖。
+ * 60Hz 下 33ms=掉 1 帧；90Hz 下掉 1 帧只有 22ms；160Hz 只有 12.5ms。
+ * 写死 33 换到高刷机器会把"掉了一帧"误判成"没掉帧"。见 scripts/lib/refresh.mjs。
+ */
+let VSYNC_MS = FALLBACK_VSYNC_MS;
 
 function arg(name, dflt = null) {
   const i = process.argv.indexOf(`--${name}`);
@@ -132,15 +144,15 @@ function stats(frames) {
     p95: +at(0.95).toFixed(2),
     p99: +at(0.99).toFixed(2),
     max: +f[f.length - 1].toFixed(2),
-    // 16.7ms≈60fps, 33ms=掉到 30fps 以下, 50ms=肉眼可见的卡顿
-    drop30: f.filter((x) => x > 33).length,
-    jank50: f.filter((x) => x > 50).length,
+    // 阈值随实测 vsync 变（掉 1 帧 ≈ 2 个 vsync，掉 2 帧 ≈ 3 个），不写死 16.7/33/50
+    drop1: f.filter((x) => x > drop1Ms(VSYNC_MS)).length,
+    drop2: f.filter((x) => x > drop2Ms(VSYNC_MS)).length,
   };
 }
 
 function fmt(s) {
   if (!s) return "无数据";
-  return `n=${String(s.n).padStart(4)} 均值=${String(s.mean).padStart(6)}ms p95=${String(s.p95).padStart(6)}ms p99=${String(s.p99).padStart(6)}ms 最大=${String(s.max).padStart(7)}ms  >33ms:${String(s.drop30).padStart(3)}  >50ms:${String(s.jank50).padStart(3)}`;
+  return `n=${String(s.n).padStart(4)} 均值=${String(s.mean).padStart(6)}ms p95=${String(s.p95).padStart(6)}ms p99=${String(s.p99).padStart(6)}ms 最大=${String(s.max).padStart(7)}ms  掉1帧:${String(s.drop1).padStart(3)} 掉2帧:${String(s.drop2).padStart(3)}`;
 }
 
 // ---------------------------------------------------------------- 主流程
@@ -251,6 +263,12 @@ async function main() {
     console.log(`带 backdrop-filter 的元素: ${diag.total} 个`);
     for (const [c, n] of diag.top) console.log(`    ${String(n).padStart(3)} × ${c}`);
 
+    // ---- 实测渲染节奏（判据要跟着它走，不能写死 60Hz）----
+    await cdp.send("Page.bringToFront");
+    const refresh = await detectRefresh(cdp);
+    VSYNC_MS = refresh.ms;
+    console.log(describeRefresh(refresh, VSYNC_MS));
+
     await cdp.js(SAMPLER);
 
     /** 施加一个测量状态: data-glass + 一段注入的覆盖 CSS */
@@ -303,9 +321,9 @@ async function main() {
           const v = runs.filter(Boolean).map((s) => s[k]).sort((a, b) => a - b);
           return v.length ? v[Math.floor(v.length / 2)] : NaN;
         };
-        const row = { name: c.name, mean: med("mean"), p95: med("p95"), drop30: med("drop30") };
+        const row = { name: c.name, mean: med("mean"), p95: med("p95"), drop1: med("drop1") };
         out.push(row);
-        console.log(`  ${row.name.padEnd(34)} 均值 ${String(row.mean).padStart(7)}ms  p95 ${String(row.p95).padStart(7)}ms  >33ms: ${row.drop30}`);
+        console.log(`  ${row.name.padEnd(34)} 均值 ${String(row.mean).padStart(7)}ms  p95 ${String(row.p95).padStart(7)}ms  掉1帧: ${row.drop1}`);
       }
       const base = out[0];
       console.log("\n================ 消融结论 ================");
@@ -333,12 +351,12 @@ async function main() {
       const v = arr.filter(Boolean).map((s) => s[k]).sort((a, b) => a - b);
       return v.length ? v[Math.floor(v.length / 2)] : NaN;
     };
-    const on = { p95: avg(results.on, "p95"), drop30: avg(results.on, "drop30"), mean: avg(results.on, "mean") };
-    const off = { p95: avg(results.off, "p95"), drop30: avg(results.off, "drop30"), mean: avg(results.off, "mean") };
+    const on = { p95: avg(results.on, "p95"), drop1: avg(results.on, "drop1"), mean: avg(results.on, "mean") };
+    const off = { p95: avg(results.off, "p95"), drop1: avg(results.off, "drop1"), mean: avg(results.off, "mean") };
 
     console.log("\n================ 汇总 (各轮中位数) ================");
-    console.log(`玻璃开: 均值 ${on.mean}ms  p95 ${on.p95}ms  >33ms 帧数 ${on.drop30}`);
-    console.log(`玻璃关: 均值 ${off.mean}ms  p95 ${off.p95}ms  >33ms 帧数 ${off.drop30}`);
+    console.log(`玻璃开: 均值 ${on.mean}ms  p95 ${on.p95}ms  掉1帧 ${on.drop1}`);
+    console.log(`玻璃关: 均值 ${off.mean}ms  p95 ${off.p95}ms  掉1帧 ${off.drop1}`);
     if (on.p95 && off.p95) {
       const slower = ((on.p95 / off.p95 - 1) * 100).toFixed(0);
       console.log(`玻璃带来的额外卡顿(p95): +${slower}%`);

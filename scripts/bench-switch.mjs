@@ -8,9 +8,10 @@
  *
  * 它回答两个问题：
  *   1. 这台机器有没有硬件加速？（**先看这一行**：没有 GPU 时所有数字都要按"CPU 在画"来读）
- *   2. 切一次页面要几个帧？（1 个掉帧 = 31ms 是可接受的；几百 ms 就会出现
- *      "整块内容先从左上角冒出来再铺满"——CPU 一帧画不完，合成器先呈现已画好的分块，
- *      而栅格顺序大致从左往右、从上往下。详见 docs/RENDER-PERF.md 第 10 节。）
+ *   2. 切一次页面要几个帧？（"1 个掉帧"是多少 ms **随刷新率变**：60Hz≈33ms、
+ *      90Hz≈22ms、160Hz≈12.5ms —— 脚本会实测，不写死；见 scripts/lib/refresh.mjs。
+ *      几百 ms 就会出现"整块内容先从左上角冒出来再铺满"——CPU 一帧画不完，
+ *      合成器先呈现已画好的分块，而栅格顺序大致从左往右、从上往下。详见 docs/RENDER-PERF.md 第 10 节。）
  *
  * 用法:
  *   npm run bench:switch -- --user-data-dir <演示库目录> --password <主密码>
@@ -26,8 +27,16 @@
 import { spawn } from "node:child_process";
 import * as path from "node:path";
 import * as url from "node:url";
+import { FALLBACK_VSYNC_MS, detectRefresh, describeRefresh, drop1Ms, drop2Ms } from "./lib/refresh.mjs";
 
 const ROOT = path.resolve(path.dirname(url.fileURLToPath(import.meta.url)), "..");
+
+/**
+ * 判据基准（ms）。**不写死 60Hz**：运行时由 detectRefresh() 探测后覆盖。
+ * "1 个掉帧"在 60Hz 是 33ms，在 90Hz 只有 22ms，160Hz 只有 12.5ms。
+ * 见 scripts/lib/refresh.mjs。
+ */
+let VSYNC_MS = FALLBACK_VSYNC_MS;
 
 function arg(name, dflt = null) {
   const i = process.argv.indexOf(`--${name}`);
@@ -200,6 +209,12 @@ async function main() {
   const glass = await cdp.js(`return document.documentElement.dataset.glass;`);
   console.log(`玻璃效果: ${glass ?? "?"}   窗口材质: ${await cdp.js(`return document.documentElement.dataset.mat;`)}`);
 
+  // ---- 实测渲染节奏（"1 个掉帧"是多少 ms 随刷新率变，不能写死）----
+  await cdp.send("Page.bringToFront");
+  const refresh = await detectRefresh(cdp);
+  VSYNC_MS = refresh.ms;
+  console.log(describeRefresh(refresh, VSYNC_MS));
+
   if (OVERRIDE) {
     await cdp.js(`
       const s = document.createElement("style");
@@ -309,7 +324,11 @@ async function main() {
 
   console.log(`\n== 切页期间逐帧间隔 (共 ${dt.length} 帧) ==`);
   console.log(`  中位 ${q(0.5)}ms  p95 ${q(0.95)}ms  max ${Math.max(...dt)}ms`);
-  console.log(`  >33ms: ${over(33)} 帧   >50ms: ${over(50)} 帧   >100ms: ${over(100)} 帧`);
+  console.log(
+    `  掉1帧(>${drop1Ms(VSYNC_MS).toFixed(0)}ms): ${over(drop1Ms(VSYNC_MS))} 帧` +
+      `   掉2帧(>${drop2Ms(VSYNC_MS).toFixed(0)}ms): ${over(drop2Ms(VSYNC_MS))} 帧` +
+      `   严重(>${(2 * drop2Ms(VSYNC_MS)).toFixed(0)}ms): ${over(2 * drop2Ms(VSYNC_MS))} 帧`,
+  );
 
   // 主线程耗时拆解 —— 这一节决定了该往哪修:
   //   ScriptDuration 大 → React/DOM 在挂载, 修法是"别卸载页面"
@@ -358,11 +377,12 @@ async function main() {
     console.log(
       `\n== 稳态汇总 ==  ${steady.length} 次切换: 中位 ${s[Math.floor(s.length / 2)]}ms / 最大 ${s[s.length - 1]}ms`,
     );
-    // 一个掉帧 = 两个 vsync ≈ 31ms。超过这个数就说明一帧没画完，用户能看见。
+    // "掉 1 帧" = 两个 vsync 没出帧。门槛随实测刷新率走（60Hz≈33ms / 90Hz≈22ms / 160Hz≈12.5ms）。
+    const dropMs = drop1Ms(VSYNC_MS);
     console.log(
-      s[s.length - 1] > 33
-        ? `  ⚠ 有切换超过 1 个掉帧 —— 软件渲染下这就是"内容从左上角铺开"的来源`
-        : `  ✔ 每次切换都在 1 个掉帧以内`,
+      s[s.length - 1] > dropMs
+        ? `  ⚠ 有切换超过 1 个掉帧(>${dropMs.toFixed(0)}ms) —— 软件渲染下这就是"内容从左上角铺开"的来源`
+        : `  ✔ 每次切换都在 1 个掉帧以内(<${dropMs.toFixed(0)}ms)`,
     );
   }
 
