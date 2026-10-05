@@ -459,6 +459,161 @@ async function main() {
     await sleep(600);
     await cdp.shot(path.join(OUT, "04-entry.png"));
 
+    // ---- 4b. 密码默认不明文（2026-10-05 新增护栏）----
+    // 真实缺陷只有一条：**EntryModal 的密码框 / TOTP 框压根没有 type="password"**，
+    // 于是编辑既有条目时原密码一直明文摆着 —— 而这个弹窗会被截屏、被旁观、被录屏。
+    // 红测证实：旧代码上这里能读到 `type === "text"`。
+    //
+    // ★ 详情页那几条是**既有行为的看门狗，不是本次修复**：App.tsx 里本来就有三处
+    //   setShowPw(false)（列表行点击 / 命令面板 / 健康页跳转），换条目会自动遮罩 ——
+    //   所以它们在旧代码上就是绿的，**红测红不了**。留着是为了防以后有人删掉其中一处：
+    //   遮罩一旦跨条目粘住，用户本人多半不会察觉（这正是最该防的那种静默回归）。
+    //   写护栏时别把它记成"这次修的"，那会把结论记歪。
+    console.log("\n密码默认不明文");
+
+    const PW_STATE = `
+      const cell = [...document.querySelectorAll(".detail .field")]
+        .find((f) => f.querySelector(".lbl")?.textContent === "密码");
+      if (!cell) return "NOMARKUP";
+      const hasEye = [...cell.querySelectorAll(".ops button")]
+        .some((b) => b.textContent.includes("👁") || b.textContent.includes("🙈"));
+      return JSON.stringify({
+        hasEye,
+        revealed: !!cell.querySelector(".pw-colored"),
+        masked: (cell.querySelector(".val")?.textContent || "").includes("•"),
+      });
+    `;
+    const PW_EYE = `
+      const cell = [...document.querySelectorAll(".detail .field")]
+        .find((f) => f.querySelector(".lbl")?.textContent === "密码");
+      const btn = cell && [...cell.querySelectorAll(".ops button")]
+        .find((b) => b.textContent.includes("👁") || b.textContent.includes("🙈"));
+      if (!btn) return "NOBTN";
+      btn.click();
+      return "ok";
+    `;
+    const readPwState = async () => {
+      const raw = await cdp.js(PW_STATE);
+      if (!raw || raw === "NOMARKUP") return { hasEye: false, revealed: false, masked: false };
+      return JSON.parse(raw);
+    };
+    const pickRow = (i) =>
+      `const r = document.querySelectorAll(".entry-list .row")[${i}]; if (!r) return "NOROW"; r.click(); return "ok";`;
+
+    const rowN = Number(entryRows) || 0;
+    const pwRows = [];
+    for (let i = 0; i < rowN && pwRows.length < 2; i++) {
+      // eslint-disable-next-line no-await-in-loop
+      await cdp.js(pickRow(i));
+      // eslint-disable-next-line no-await-in-loop
+      await sleep(320);
+      // eslint-disable-next-line no-await-in-loop
+      const s = await readPwState();
+      if (s.hasEye) pwRows.push(i);
+    }
+    check(pwRows.length >= 2, `演示库里找到 2 个带密码的条目（行号 ${pwRows.join("/") || "无"}）`);
+
+    if (pwRows.length >= 2) {
+      await cdp.js(pickRow(pwRows[0]));
+      await sleep(340);
+      const s0 = await readPwState();
+      check(s0.revealed === false && s0.masked === true, "详情页密码默认是遮罩（不是明文）");
+
+      await cdp.js(PW_EYE);
+      await sleep(300);
+      const s1 = await readPwState();
+      check(s1.revealed === true, "点 👁 能明文查看");
+
+      // 以下两条是**既有行为**的看门狗（见本节开头注释），只防回归，不是本次修复。
+      await cdp.js(pickRow(pwRows[1]));
+      await sleep(380);
+      const s2 = await readPwState();
+      check(
+        s2.revealed === false && s2.masked === true,
+        "★ 看门狗: 换到别的条目后自动回到遮罩（防复位代码被删）",
+      );
+
+      await cdp.js(pickRow(pwRows[0]));
+      await sleep(380);
+      const s3 = await readPwState();
+      check(s3.revealed === false && s3.masked === true, "★ 看门狗: 切回原条目也回到遮罩");
+
+      // ---- 编辑弹窗 ----
+      await cdp.js(clickSel('[title="编辑"]'));
+      await sleep(650);
+      const MODAL_TYPES = `
+        const ins = [...document.querySelectorAll(".modal .gate-input")];
+        const byPh = (p) => ins.find((i) => (i.placeholder || "").startsWith(p));
+        const pw = byPh("密码"), totp = byPh("TOTP");
+        return JSON.stringify({
+          count: ins.length,
+          pwType: pw ? pw.type : null,
+          pwLen: pw ? pw.value.length : -1,
+          totpType: totp ? totp.type : null,
+          painted: !!document.querySelector(".modal .pw-colored"),
+        });
+      `;
+      const m = JSON.parse(await cdp.js(MODAL_TYPES));
+      check(m.pwType === "password", `★ 编辑弹窗的密码框默认遮罩（type=password，实际 ${m.pwType}）`);
+      check(m.totpType === "password", `★ 编辑弹窗的 TOTP 密钥框默认遮罩（实际 ${m.totpType}）`);
+      check(m.pwLen > 0, "预置条件: 弹窗里确实预填了密码（否则上一条可能只是「空框也遮罩」）");
+      check(m.painted === false, "编辑弹窗里没有任何明文密码着色节点 (.pw-colored)");
+      await cdp.shot(path.join(OUT, "04b-edit-masked.png"));
+
+      const MODAL_EYE = (i) => `
+        const line = document.querySelectorAll(".modal .pw-line")[${i}];
+        const b = line && [...line.querySelectorAll("button")]
+          .find((x) => x.textContent.includes("👁") || x.textContent.includes("🙈"));
+        if (!b) return "NOBTN";
+        b.click();
+        return "ok";
+      `;
+      const MODAL_TWO = `
+        const ins = [...document.querySelectorAll(".modal .gate-input")];
+        const byPh = (p) => ins.find((i) => (i.placeholder || "").startsWith(p));
+        return JSON.stringify({ pw: byPh("密码")?.type, totp: byPh("TOTP")?.type });
+      `;
+      // ★ 这几条必须断言「切换」，不能断言「绝对状态」——
+      //   旧代码的 input 没有 type 属性，默认就是 "text"，所以
+      //   「点完 👁 之后是 text」在坏代码上**照样成立**（恒真，红测红不了）。
+      //   必须成对儿比 before/after，"遮罩→明文"才是真的被测行为。
+      let before = JSON.parse(await cdp.js(MODAL_TWO));
+      await cdp.js(MODAL_EYE(0));
+      await sleep(280);
+      let after = JSON.parse(await cdp.js(MODAL_TWO));
+      check(
+        before.pw === "password" && after.pw === "text",
+        `★ 点 👁 是真的「遮罩→明文」切换（${before.pw} → ${after.pw}）`,
+      );
+      check(
+        before.totp === "password" && after.totp === "password",
+        `★ 点密码的 👁 不会连带把 TOTP 密钥也放出来（TOTP 始终 ${before.totp} → ${after.totp}）`,
+      );
+      await cdp.shot(path.join(OUT, "04c-edit-revealed.png"));
+
+      await cdp.js(MODAL_EYE(0));
+      await sleep(280);
+      const back = JSON.parse(await cdp.js(MODAL_TWO));
+      check(back.pw === "password", `再点一次能遮回去（text → ${back.pw}）`);
+
+      await cdp.js(MODAL_EYE(1));
+      await sleep(280);
+      const t2 = JSON.parse(await cdp.js(MODAL_TWO));
+      check(
+        t2.totp === "text" && t2.pw === "password",
+        `TOTP 的眼睛能单独打开、且不把密码带出来（pw=${t2.pw} totp=${t2.totp}）`,
+      );
+      await cdp.js(MODAL_EYE(1));
+      await sleep(220);
+
+      await cdp.js(clickText("取消"));
+      await sleep(450);
+      check(
+        await cdp.js(`return !document.querySelector(".modal-mask");`),
+        "编辑弹窗已关闭（不留残影，不影响后面的章节）",
+      );
+    }
+
     // ---- 5. 历史弹窗 ----
     // 演示库里只有个别条目改过核心字段, 所以逐条试: 打开历史 → 有 .hist-item 就停.
     // 顺带就把"历史确实记下来了"这件事验了。

@@ -20,6 +20,11 @@ export function EntryModal(props: {
   const [totp, setTotp] = useState(editing?.extra?.totp ?? "");
   const [err, setErr] = useState("");
   const [genOpen, setGenOpen] = useState(false);
+  // ★ 默认遮罩（2026-10-05）。编辑既有条目时这两个框里装的就是**真实凭据**，
+  //   而这个弹窗会被截屏、被旁人瞄一眼、被录屏 —— 明文摆着没有任何收益。
+  //   要点开确认再点 👁，是"每次都要重新同意"。
+  const [showPw, setShowPw] = useState(false);
+  const [showTotp, setShowTotp] = useState(false);
 
   async function submit() {
     if (!title.trim()) {
@@ -72,9 +77,21 @@ export function EntryModal(props: {
           <input
             className="gate-input grow"
             placeholder="密码"
+            type={showPw ? "text" : "password"}
+            autoComplete="off"
+            autoCorrect="off"
+            spellCheck={false}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
+          <button
+            className="iconbtn"
+            title={showPw ? "隐藏密码" : "显示密码"}
+            aria-label={showPw ? "隐藏密码" : "显示密码"}
+            onClick={() => setShowPw((v) => !v)}
+          >
+            {showPw ? "🙈" : "👁"}
+          </button>
           <button className="gen-btn" onClick={() => setGenOpen(true)}>
             🪄 生成
           </button>
@@ -85,12 +102,26 @@ export function EntryModal(props: {
           value={url}
           onChange={(e) => setUrl(e.target.value)}
         />
-        <input
-          className="gate-input"
-          placeholder="TOTP 密钥（可选，Base32，如 JBSWY3DPEHPK3PXP）"
-          value={totp}
-          onChange={(e) => setTotp(e.target.value)}
-        />
+        <div className="pw-line">
+          <input
+            className="gate-input grow"
+            placeholder="TOTP 密钥（可选，Base32，如 JBSWY3DPEHPK3PXP）"
+            type={showTotp ? "text" : "password"}
+            autoComplete="off"
+            autoCorrect="off"
+            spellCheck={false}
+            value={totp}
+            onChange={(e) => setTotp(e.target.value)}
+          />
+          <button
+            className="iconbtn"
+            title={showTotp ? "隐藏密钥" : "显示密钥"}
+            aria-label={showTotp ? "隐藏密钥" : "显示密钥"}
+            onClick={() => setShowTotp((v) => !v)}
+          >
+            {showTotp ? "🙈" : "👁"}
+          </button>
+        </div>
         <textarea
           className="gate-input"
           placeholder="备注"

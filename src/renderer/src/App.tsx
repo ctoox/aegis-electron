@@ -399,8 +399,12 @@ export default function App() {
     const pw = await api.pw.generate({ ...genDefaultsOf(settings) });
     await api.vault.update(e.id, { password: pw });
     await refresh(e.id);
-    setShowPw(true);
-    notify("已生成并保存新密码", "ok");
+    // ★ 不再自动明文（2026-10-05，按用户要求）。原来这里是 setShowPw(true)，
+    //   等于"生成完就替你把密码摊开"。生成器弹窗里人已经看过预览了，这里保持
+    //   遮罩：想看按 👁、想用按 ⧉。
+    //   （详情页的遮罩复位本来就有：列表行点击 / 命令面板 / 健康页跳转三处
+    //     各写了 setShowPw(false)，这里不动那套。）
+    notify("已生成并保存新密码 · 按 👁 可查看", "ok");
   }
 
   async function removeEntry(e: EntryWithStrength) {
