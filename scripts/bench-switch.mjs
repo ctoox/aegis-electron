@@ -17,6 +17,8 @@
  *   npm run bench:switch -- --user-data-dir <目录> --password <密码> --rounds 8
  *   npm run bench:switch -- --user-data-dir <目录> --password <密码> --override ':root{--g-bg:#dfe6f2;}'
  *     ↑ 消融：临时注入 CSS 看某项样式占多少（一次只改一个变量，否则结论无效）
+ *     ↑ 注入后**会打印每个选择器的命中数**；一个都没命中就直接说"本次消融无效"
+ *       —— 免得"注入没生效"被读成"这个属性没用"（见 docs/RENDER-PERF.md 第 13 节）
  *
  * ⚠ 与 smoke-electron.mjs 同源的两个环境坑: ELECTRON_RUN_AS_NODE 要清掉;
  *   必须用 Node spawn 起 Electron (从 shell 直接起会秒退)。
@@ -208,6 +210,30 @@ async function main() {
     `);
     await sleep(500);
     console.log(`已注入 --override: ${OVERRIDE}`);
+    // ★ 消融实验最危险的失败模式是**注入没生效**，然后"数字没变"被读成
+    //   "这个属性没用"。所以这里主动证明观测手段能看到被测对象：把 override 里
+    //   每个选择器在当前 DOM 上的命中数打出来；一个都没命中就判本次消融无效。
+    //   （某个选择器命中 0 也可能只是"它对应的视图此刻不在场"，比如 .page 只在设置页。）
+    const hits = await cdp.js(`
+      const sels = ${JSON.stringify(OVERRIDE)}
+        .split("}").map((block) => (block.split("{")[0] || ""))
+        .flatMap((sel) => sel.split(","))
+        .map((s) => s.trim())
+        .filter((s) => s && !s.startsWith("@"));
+      const out = {};
+      for (const s of sels) {
+        try { out[s] = document.querySelectorAll(s).length; } catch { out[s] = -1; }
+      }
+      return out;
+    `);
+    const parts = Object.entries(hits).map(([s, n]) => `${s}=${n === -1 ? "选择器无效" : n}`);
+    const totalHits = Object.values(hits).reduce((a, b) => a + (b > 0 ? b : 0), 0);
+    console.log(`  override 命中: ${parts.join("   ")}`);
+    if (totalHits === 0) {
+      console.log(
+        `  ⚠ --override 一个元素都没命中 → **本次消融无效**；别把"数字没变"读成"这个属性没用"。`,
+      );
+    }
   }
 
   // 采样器: 记录每帧间隔（用 rAF，不用 setTimeout —— 后台/被遮挡时 rAF 会被节流，
