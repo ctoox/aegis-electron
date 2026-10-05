@@ -449,6 +449,56 @@ async function main() {
       check(ok === "true", `设置页 DOM 里出现 ${name}`);
     }
 
+    // 剪贴板这一节的选项与文案。用无界鼠标（Mouse Without Borders）跨机粘贴的人会持续
+    // 撞上「走到对面粘不出来」—— 因为清空剪贴板会被同步过去。他们得能在这个下拉里
+    // 看到「5 分钟 / 不清空」，并且看到一句话解释为什么。
+    //
+    // ★ 断言用的短语必须只属于这一段。第一版写的是 "托盘右键"，而下面「关闭窗口时最小化
+    //   到托盘」那行的说明里本来就有这四个字 —— 于是这条断言在旧代码上也是绿的（恒真）。
+    //   红测才把它抓出来，所以现在改成一个只有本段会写的完整句子。
+    const clipUi = JSON.parse(
+      String(
+        await cdp.js(`
+          const sel = [...document.querySelectorAll("select")].find((s) =>
+            [...s.options].some((o) => o.textContent === "不清空"),
+          );
+          const hintEl = [...document.querySelectorAll("p.sec-hint")].find((p) =>
+            p.textContent.includes("会被同步到另一台机器"),
+          );
+          const txt = document.body.innerText;
+          return JSON.stringify({
+            selFound: Boolean(sel),
+            opts: [...(sel ? sel.options : [])].map((o) => o.textContent),
+            value: sel ? sel.value : null,
+            label: sel && sel.selectedIndex >= 0 ? sel.options[sel.selectedIndex].textContent : null,
+            warn: hintEl ? hintEl.classList.contains("warn") : null,
+            hint: txt.includes("会被同步到另一台机器"),
+            trayClear: txt.includes("清除剪贴板中的密码"),
+          });
+        `),
+      ),
+    );
+    console.log(
+      `    · 清空时长选项 = ${clipUi.opts.join(" / ")}；当前选中 = ${clipUi.value} (${clipUi.label})，警示色 = ${clipUi.warn}`,
+    );
+    check(clipUi.selFound, "设置页有「剪贴板自动清空」下拉（靠「不清空」这一项认出来）");
+    check(clipUi.opts.includes("5 分钟"), "★ 时长里有「5 分钟」这一档（跨机粘贴要留够时间）");
+    // 下拉显示的文字必须与取值一致（clipClearLabel 是 30→「30 秒」、300→「5 分钟」）
+    const labelOk =
+      clipUi.value === "0"
+        ? clipUi.label === "不清空"
+        : clipUi.label === `${clipUi.value} 秒` ||
+          clipUi.label === `${Number(clipUi.value) / 60} 分钟`;
+    check(labelOk, `选项标签与取值对得上（${clipUi.value} → ${clipUi.label}）`);
+    // 警示色是**条件**样式: 只有选「不清空」时才该亮。写死一边都会错 ——
+    // 永远亮是「狼来了」（默认 30 秒也亮），永远不亮是这条提示白做。
+    check(
+      clipUi.warn === (clipUi.value === "0"),
+      `★ 警示色跟着「不清空」走（值=${clipUi.value} → warn=${clipUi.warn}）`,
+    );
+    check(clipUi.hint, "★ 写明了「清空剪贴板会被同步到另一台机器」（无界鼠标那个坑）");
+    check(clipUi.trayClear, "提示指向了托盘的「清除剪贴板中的密码」");
+
     // ---- 9. 快速填充（Auto-Type）----
     //   这一组是**安全护栏**: "面板看不到密码"和"面板弹出来不会把自己的库锁掉"
     //   都属于"改坏了不会报错、只会静默变危险"的那一类, 必须由脚本盯着。

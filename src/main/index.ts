@@ -271,6 +271,11 @@ let clipTimer: NodeJS.Timeout | null = null;
 /** 最后一次由我们写入剪贴板的明文; 用于判断"用户是否已经复制了别的东西" */
 let clipToken: string | null = null;
 
+/** 剪贴板里是否还躺着我们写进去的秘密 —— 托盘菜单据此决定要不要给「清除」那一项 */
+function clipboardHoldsSecret(): boolean {
+  return clipToken !== null;
+}
+
 function readClipboardSafe(): string {
   try {
     return clipboard.readText();
@@ -280,8 +285,8 @@ function readClipboardSafe(): string {
   }
 }
 
-/** 清空剪贴板; force=true 时不管内容是否被改过 */
-function wipeClipboard(force = false): void {
+/** 清空剪贴板; force=true 时不管内容是否被改过。返回**是否真的清掉了** */
+function wipeClipboard(force = false): boolean {
   if (clipTimer) {
     clearTimeout(clipTimer);
     clipTimer = null;
@@ -289,7 +294,8 @@ function wipeClipboard(force = false): void {
   if (!force && clipToken !== null && readClipboardSafe() !== clipToken) {
     // 用户已经复制了新内容, 不要去动它
     clipToken = null;
-    return;
+    refreshTrayMenu();
+    return false;
   }
   try {
     clipboard.clear();
@@ -297,7 +303,9 @@ function wipeClipboard(force = false): void {
     /* 剪贴板被占用, 忽略 */
   }
   clipToken = null;
+  refreshTrayMenu();
   mainWindow?.webContents.send("clip:cleared");
+  return true;
 }
 
 function copyToClipboard(text: string): { clearIn: number } {
@@ -307,6 +315,9 @@ function copyToClipboard(text: string): { clearIn: number } {
     return { clearIn: 0 };
   }
   clipToken = text;
+  // 托盘多出一项「清除剪贴板中的密码」—— 时长设成「不清空」的人需要
+  // 一个随时能收尾的地方, 否则密码会一直留在剪贴板里且界面上看不出来
+  refreshTrayMenu();
   if (clipTimer) clearTimeout(clipTimer);
   const secs = settings.clipboardClearSeconds;
   if (secs > 0) {
@@ -319,9 +330,11 @@ function copyToClipboard(text: string): { clearIn: number } {
           /* ignore */
         }
         clipToken = null;
+        refreshTrayMenu();
         mainWindow?.webContents.send("clip:cleared");
       } else {
         clipToken = null;
+        refreshTrayMenu();
       }
     }, secs * 1000);
   }
@@ -384,33 +397,58 @@ function buildTray(): void {
     tray = null;
     return;
   }
-  refreshTrayMenu();
-  tray.setToolTip("神盾 Aegis");
+  refreshTrayMenu(); // 提示语也由它设置, 别在这之后覆写
   // 左键点托盘图标: 把窗口叫回来 (Windows/Linux 的常规习惯)
   tray.on("click", showMainWindow);
 }
 
-/** 库的解锁状态变了就重建菜单, 让「锁定密码库」的可用态跟着变 */
+/**
+ * 库的解锁状态变了就重建菜单, 让「锁定密码库」的可用态跟着变;
+ * 剪贴板里还躺着我们写进去的密码时, 再多给一项「清除剪贴板中的密码」。
+ *
+ * 为什么需要这一项: 跨机粘贴（无界鼠标之类）的人必须把自动清空调长或直接选「不清空」,
+ * 否则清空的瞬间会被同步过去、对面粘不出东西。可一旦选了「不清空」, 密码就无声地
+ * 一直留在剪贴板里 —— 界面和托盘都得能看见这件事, 并且能一键收尾。
+ */
 function refreshTrayMenu(): void {
   if (!tray) return;
-  tray.setContextMenu(
-    Menu.buildFromTemplate([
-      { label: "显示主窗口", click: showMainWindow },
-      {
-        label: "锁定密码库",
-        enabled: vault?.unlocked ?? false,
-        click: () => lockVault("manual"),
-      },
+  const hold = clipboardHoldsSecret();
+  const items: MenuItemConstructorOptions[] = [
+    { label: "显示主窗口", click: showMainWindow },
+    {
+      label: "锁定密码库",
+      enabled: vault?.unlocked ?? false,
+      click: () => lockVault("manual"),
+    },
+  ];
+  if (hold) {
+    items.push(
       { type: "separator" },
       {
-        label: "退出神盾",
+        label: "清除剪贴板中的密码",
+        // 故意**不加 force**: 菜单可能是刚打开前那一眼的状态, 期间用户可能又复制了
+        // 别的东西。force 会连用户的新内容一起清掉 —— 宁可少清, 不能误清。
         click: () => {
-          isQuitting = true;
-          app.quit();
+          if (!wipeClipboard()) {
+            notifyRenderer("剪贴板里已经不是神盾写入的密码了，未做改动");
+          }
         },
       },
-    ]),
+    );
+  }
+  items.push(
+    { type: "separator" },
+    {
+      label: "退出神盾",
+      click: () => {
+        isQuitting = true;
+        app.quit();
+      },
+    },
   );
+  tray.setContextMenu(Menu.buildFromTemplate(items));
+  // 提示语也带上状态: 窗口缩在托盘里时, 悬停是唯一能看见「还有密码在剪贴板里」的地方
+  tray.setToolTip(hold ? "神盾 Aegis — 剪贴板中还有密码" : "神盾 Aegis");
 }
 
 // ============================================================ 泄露检测

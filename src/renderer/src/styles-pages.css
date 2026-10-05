@@ -1140,6 +1140,13 @@ input[type="range"] {
   font-weight: 600;
 }
 
+/* 需要留意的状态（比如剪贴板被设成「不清空」）换成警示色 ——
+   混在普通灰字说明里会被一眼略过 */
+.sec-hint.warn,
+.sec-hint.warn b {
+  color: var(--warn);
+}
+
 /* 「快速填充」的热键展示行: 键帽 + 注册状态旗子 */
 .at-hotkey {
   display: flex;

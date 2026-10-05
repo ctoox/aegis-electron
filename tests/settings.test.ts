@@ -6,8 +6,10 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import {
+  CLIP_CLEAR_CHOICES,
   DEFAULT_SETTINGS,
   SETTINGS_FILENAME,
+  clipClearLabel,
   loadSettings,
   normalizeSettings,
   saveSettings,
@@ -57,6 +59,22 @@ function main() {
   eq(normalizeSettings({ autoLockMinutes: 0 }).autoLockMinutes, 0, "0 是合法值 (关闭自动锁)");
   eq(normalizeSettings({ clipboardClearSeconds: 9999 }).clipboardClearSeconds, 600, "剪贴板上限 600 秒");
   eq(normalizeSettings({ clipboardClearSeconds: -1 }).clipboardClearSeconds, 0, "剪贴板下限 0");
+  eq(normalizeSettings({ clipboardClearSeconds: 300 }).clipboardClearSeconds, 300, "跨机粘贴用的 5 分钟档可用");
+
+  // ---- 剪贴板自清的选项与标签 ----
+  // 为什么盯着这个列表: 「0 = 不清空」和「300 = 5 分钟」是跨机粘贴（无界鼠标那类）
+  // 唯一能用的两档 —— 自动清空的每一次触发都会被同步到另一台机器。
+  ok(CLIP_CLEAR_CHOICES.includes(0), "★ 选项里有「不清空」（跨机粘贴要靠它）");
+  ok(CLIP_CLEAR_CHOICES.includes(300), "选项里有 5 分钟（给跨机粘贴留出从容的时间）");
+  ok(
+    CLIP_CLEAR_CHOICES.every((s, i) => s >= 0 && s <= 600 && (i === 0 || s > CLIP_CLEAR_CHOICES[i - 1])),
+    "选项全部落在 0..600 内且严格递增（上限必须与 normalizeSettings 的 clamp 一致）",
+  );
+  eq(clipClearLabel(0), "不清空", "0 的标签是「不清空」");
+  eq(clipClearLabel(30), "30 秒", "不足一分钟按秒显示");
+  eq(clipClearLabel(120), "2 分钟", "整分钟换成分钟");
+  eq(clipClearLabel(300), "5 分钟", "300 → 5 分钟");
+  eq(clipClearLabel(-5), "不清空", "负数也当「不清空」，不出现 -5 秒这种标签");
   eq(normalizeSettings({ genLength: 1 }).genLength, 6, "生成长度下限 6");
   eq(normalizeSettings({ genLength: 9999 }).genLength, 64, "生成长度上限 64");
   eq(normalizeSettings({ genMinDigits: -5 }).genMinDigits, 0, "最少数字下限 0");

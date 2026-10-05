@@ -322,7 +322,10 @@ export default function App() {
     if (!t) return;
     try {
       const r = await api.clip.copy(t);
-      notify(r.clearIn > 0 ? `${label}，${r.clearIn} 秒后自动清空剪贴板` : label, "ok");
+      // clearIn = 0 是设置里的「不清空」（跨机粘贴的人常这么选）。这时必须说清楚 ——
+      // 只回一句「已复制」的话，用户会以为过一会儿它自己就没了，实际会一直留着。
+      if (r.clearIn > 0) notify(`${label}，${r.clearIn} 秒后自动清空剪贴板`, "ok");
+      else notify(`${label}（剪贴板不会自动清空 —— 用完从托盘菜单清除）`, "warn");
     } catch (e) {
       notify(cleanError(e), "err");
     }

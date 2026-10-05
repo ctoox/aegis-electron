@@ -7,6 +7,7 @@ import {
   FILL_HINTS,
   FILL_LABELS,
   FILL_MODES,
+  clipClearLabel,
   hotkeyLabel,
   type FillMode,
   type Settings,
@@ -278,11 +279,26 @@ export function SettingsPage(props: {
           >
             {CLIP_CLEAR_CHOICES.map((s) => (
               <option key={s} value={s}>
-                {s === 0 ? "不清空" : `${s} 秒`}
+                {clipClearLabel(s)}
               </option>
             ))}
           </select>
         </Row>
+        <p className={`sec-hint${settings.clipboardClearSeconds === 0 ? " warn" : ""}`}>
+          <b>要跨机粘贴（无界鼠标 / Mouse Without Borders 这类）就把时间给够。</b>
+          <span>
+            清空剪贴板是一次真实的剪贴板写入，会被同步到另一台机器 ——
+            你刚走到对面要粘贴时，那边已经空了。这类场景请选「5 分钟」或「不清空」，
+            粘完从<b>托盘右键 →「清除剪贴板中的密码」</b>收尾。
+            {settings.clipboardClearSeconds === 0 && (
+              <>
+                {" "}
+                当前就是「不清空」：密码会一直留在剪贴板里，Windows 的 Win+V 剪贴板历史也会记下它
+                （那是复制那一刻就落下的，之后清空剪贴板并不会把它从那里面删掉）。
+              </>
+            )}
+          </span>
+        </p>
         <Row title="锁定后清空剪贴板" desc="锁库时顺手把剪贴板也清掉">
           <Toggle on={settings.clearClipboardOnLock} onChange={(v) => onPatch({ clearClipboardOnLock: v })} />
         </Row>

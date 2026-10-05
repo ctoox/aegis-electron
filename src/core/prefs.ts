@@ -128,7 +128,27 @@ export interface Settings {
 }
 
 export const AUTO_LOCK_CHOICES = [0, 1, 5, 15, 30, 60] as const;
-export const CLIP_CLEAR_CHOICES = [0, 10, 20, 30, 60, 120] as const;
+
+/**
+ * 剪贴板自动清空的时长（秒）。**0 = 不清空**。
+ *
+ * 为什么要单独留 300（5 分钟）这一档：用「无界鼠标 / Mouse Without Borders」
+ * 这类工具把密码送到另一台机器时，「清空」是一次**真实的剪贴板写入**，会被
+ * 镜像过去 —— 于是你刚走到对面要粘贴，那边已经空了。跨机粘贴的时间预算根本
+ * 不可控，所以既要给得起长时长，也要允许直接选 0。
+ * 选 0 之后靠托盘菜单的「清除剪贴板中的密码」收尾（`wipeClipboard`）。
+ */
+export const CLIP_CLEAR_CHOICES = [0, 10, 20, 30, 60, 120, 300] as const;
+
+/**
+ * 时长的人话标签。设置页的下拉与各处提示语共用同一份，避免出现
+ * 「选项里写 5 分钟、提示里写 300 秒」这种同义不同形的说法。
+ */
+export function clipClearLabel(secs: number): string {
+  if (!Number.isFinite(secs) || secs <= 0) return "不清空";
+  if (secs % 60 === 0) return `${secs / 60} 分钟`;
+  return `${secs} 秒`;
+}
 
 export const DEFAULT_SETTINGS: Settings = {
   autoLockMinutes: 5,
